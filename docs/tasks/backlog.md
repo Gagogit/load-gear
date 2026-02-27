@@ -54,3 +54,14 @@
 35. [x] Task-032 — HPFC Upload Service + API (Polars CSV parser, 5 endpoints on /api/v1/hpfc)
 36. [x] Task-033 — Financial Calculation Service + API (forecast × HPFC vector multiply, monthly summaries, CSV/XLSX export, 3 endpoints on /api/v1/financial)
 37. [x] Task-034 — Phase 6 Tests + Integration Test (230 tests total)
+
+## Phase 7 — Weather Integration & Asset Intelligence
+
+38. [x] Task-035 — DWD Weather Station Import Service (Polars CSV parser, J/cm²→W/m², CET→UTC, weather_observation_repo with PostGIS KNN)
+39. [x] Task-036 — Weather API Fallback (BrightSky + Open-Meteo, 10km cache dedup, confidence-based trigger)
+40. [x] Task-037 — Spatial-Temporal Join + Weather Correlation Engine (PostGIS KNN, temp/GHI/wind correlations, lag analysis -3h to +3h)
+41. [x] Task-038 — Asset Fingerprinting Implementation (PV midday dip + GHI corr, battery night charge + variance ratio, KWK baseload CV + seasonal)
+42. [x] Task-039 — Enhanced Imputation + Forecast Strategies (weather flag=3, weather_conditioned + asset_scenarios strategies)
+43. [x] Task-040 — Weather Admin Endpoints (4 endpoints on /api/v1/weather: import, stations, observations, delete)
+44. [x] Task-041 — PLZ Geocoding Service (909 centroids, 3-digit/2-digit prefix fallback, wired into analysis P4.2)
+45. [x] Task-042 — Phase 7 Tests + Integration Test (292 tests total)
