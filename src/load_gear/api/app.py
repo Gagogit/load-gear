@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from load_gear.core.database import dispose_engine
-from load_gear.api.routes import admin, files, ingest, jobs
+from load_gear.api.routes import admin, files, ingest, jobs, qa
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(files.router)
     app.include_router(ingest.router)
+    app.include_router(qa.router)
 
     return app
 

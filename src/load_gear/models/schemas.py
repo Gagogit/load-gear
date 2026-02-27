@@ -159,3 +159,69 @@ class NormalizedListResponse(BaseModel):
 
     items: list[NormalizedRowResponse]
     total: int
+
+
+# --- QA schemas (P3) ---
+
+
+class QARunRequest(BaseModel):
+    """POST /api/v1/qa request body."""
+
+    job_id: uuid.UUID
+
+
+class QAFindingResponse(BaseModel):
+    """Single QA check finding."""
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    check_id: int
+    check_name: str
+    status: str  # ok / warn / error
+    metric_key: str
+    metric_value: float
+    threshold: float | None = None
+    affected_slots: dict | list | None = None
+    recommendation: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class QAReportResponse(BaseModel):
+    """GET /api/v1/qa/{job_id}/report — full 9-check report."""
+
+    job_id: uuid.UUID
+    findings: list[QAFindingResponse]
+    overall_status: str  # ok / warn / error
+    created_at: datetime
+
+
+class QAStatusResponse(BaseModel):
+    """GET /api/v1/qa/{job_id}/status response."""
+
+    job_id: uuid.UUID
+    status: str
+    checks_completed: int = 0
+    checks_total: int = 9
+    overall_status: str | None = None
+    error_message: str | None = None
+
+
+class QAProfileResponse(BaseModel):
+    """GET /api/v1/qa/{job_id}/profile — hourly/weekday arrays."""
+
+    job_id: uuid.UUID
+    hourly_profile: list[float]  # 24 values (hour 0-23)
+    weekday_profile: list[float]  # 7 values (Mon=0 .. Sun=6)
+
+
+class AdminConfigResponse(BaseModel):
+    """GET/PUT /api/v1/admin/config response."""
+
+    min_kw: float = 0.0
+    max_kw: float = 10000.0
+    max_jump_kw: float = 5000.0
+    top_n_peaks: int = 10
+    min_completeness_pct: float = 95.0
+    max_gap_duration_min: int = 180
