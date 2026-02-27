@@ -86,8 +86,8 @@ Started: 2026-02-27
 - Sample CSV validates as realistic: DD.MM.YYYY, HH:MM, comma decimals, kWh, semicolons
 - Final test count: 47 tests passing (33 state machine + 7 jobs + 5 files + 2 integration)
 
-## PHASE 1 COMPLETE — STOPP
-All 9 tasks completed. Awaiting approval for Phase 2 (Ingest Pipeline).
+## PHASE 1 COMPLETE
+All 9 tasks completed. 47 tests passing.
 
 ### Phase 1 Summary
 - **13 tables** across 3 schemas (control/4, data/6, analysis/3)
@@ -97,3 +97,130 @@ All 9 tasks completed. Awaiting approval for Phase 2 (Ingest Pipeline).
 - **47 tests** all passing
 - **7 ADRs** confirmed and implemented
 - **Controller→Service→Repository** pattern established
+
+---
+
+# Phase 2 — Ingest Pipeline
+Started: 2026-02-27
+
+## Task-007: Reader Profile Repository + Pydantic Schemas
+- Status: COMPLETED
+- Decision: CRUD repo for control.reader_profiles (create, get_by_file_id, update)
+- Decision: 6 Pydantic models added: ReaderProfileRules, ReaderProfileResponse, ReaderProfileOverrideRequest, IngestRequest, IngestStatusResponse, NormalizedRowResponse, NormalizedListResponse
+- Files: repositories/reader_profile_repo.py, models/schemas.py (extended)
+
+## Task-008: Format Detection Service (P2a)
+- Status: COMPLETED
+- Decision: 5 detector modules in services/ingest/detectors/ (encoding, delimiter, datetime_format, numeric, series_type)
+- Decision: chardet for encoding, csv.Sniffer + frequency analysis for delimiter
+- Decision: Unit detection order: MWh → kWh → kW → Wh (to avoid kWh matching kW)
+- Decision: Cumulative detection via monotonic check (>90% increases)
+- Decision: "uhrzeit" added to timestamp column name set
+- Files: services/ingest/format_detector.py, services/ingest/detectors/*.py
+- Tests: 24 unit tests covering German, ISO, cumulative, tab-delimited formats
+
+## Task-009: Reader Profile API Endpoints
+- Status: COMPLETED
+- Decision: GET/PUT on /files/{id}/reader-profile (on existing files router)
+- Decision: PUT sets is_override=True, preserving original detected rules
+- Files: api/routes/files.py (extended)
+- Tests: 4 integration tests
+
+## Task-010: Normalization Service (P2b)
+- Status: COMPLETED
+- Decision: Polars Lazy API for CSV parsing (NO PANDAS)
+- Decision: zoneinfo.ZoneInfo for Europe/Berlin → UTC conversion (DST-aware)
+- Decision: Cumulative → interval via diff() on sorted timestamps
+- Decision: ORM session.add() + flush() for bulk insert (not pg_insert — session lifecycle reliability)
+- Files: services/ingest/normalizer.py, repositories/meter_read_repo.py
+- Tests: 8 unit tests including DST spring/fall
+
+## Task-011: Ingest Orchestration API
+- Status: COMPLETED
+- Decision: POST /ingest triggers P2a+P2b synchronously, returns quality stats
+- Decision: Job transitions: pending → ingesting → qa_running (or done)
+- Decision: Explicit File query instead of job.files lazy relationship (avoids MissingGreenlet)
+- Decision: Unique meter_ids per test to prevent cross-test UniqueViolation
+- Files: services/ingest/ingest_service.py, api/routes/ingest.py, api/app.py (router registration)
+- Tests: 8 integration tests
+
+## Task-012: Phase 2 Integration Test
+- Status: COMPLETED
+- Decision: Two E2E scenarios: interval data (24 rows) + cumulative data (8 rows → 7 deltas)
+- Decision: Random values per test run to avoid SHA-256 dedup issues
+- Files: tests/integration/test_phase2.py
+- Tests: 2 integration tests, 97 total
+
+## PHASE 2 COMPLETE
+All 6 tasks completed. 97 tests passing (50 new).
+
+### Phase 2 Summary
+- **Format Detection (P2a)**: 5 detector modules, handles German/ISO/cumulative/Excel formats
+- **Normalization (P2b)**: Polars-based, DST-aware UTC conversion, cumulative→interval
+- **3 new API endpoints**: POST /ingest, GET /ingest/{id}/status, GET /ingest/{id}/normalized
+- **2 reader-profile endpoints**: GET/PUT /files/{id}/reader-profile
+- **97 tests** all passing
+
+---
+
+# Phase 3 — QA Engine
+Started: 2026-02-27
+
+## Task-013: QA Schemas + quality_finding Repository
+- Status: COMPLETED
+- Decision: 6 Pydantic models: QARunRequest, QAFindingResponse, QAReportResponse, QAStatusResponse, QAProfileResponse, AdminConfigResponse
+- Decision: Repository with bulk_insert, get_by_job_id, get_by_job_and_check, delete_by_job_id (for re-runs)
+- Files: repositories/quality_finding_repo.py, models/schemas.py (extended)
+
+## Task-014: 9 QA Checks
+- Status: COMPLETED
+- Decision: Each check is a standalone module with run() function returning a finding dict
+- Decision: Checks use NumPy for statistical calculations (percentiles, mean, std)
+- Decision: kWh→kW conversion: value / (interval_minutes / 60)
+- Decision: Profiles use Europe/Berlin local time for hour/weekday grouping
+- Decision: DST dates computed dynamically (last Sunday of March/October)
+- Decision: Baseload and hourly profile are informational (always status=ok)
+- Decision: Load factor < 0.1 triggers warn
+- Files: services/qa/checks/*.py (9 modules)
+
+## Task-015: QA Orchestration Service
+- Status: COMPLETED
+- Decision: run_qa fetches all v1 rows, runs 9 checks sequentially, bulk inserts findings
+- Decision: Auto-detect interval from data (most common positive delta)
+- Decision: Previous findings deleted before re-run (idempotent)
+- Decision: Job state after QA: Statistik-only → done/warn; needs analysis → analysis_running
+- Decision: Error in any check + stats-only job → WARN (not FAILED)
+- Files: services/qa/qa_service.py, services/qa/config.py
+
+## Task-016: QA API Endpoints
+- Status: COMPLETED
+- Decision: 5 endpoints on /api/v1/qa prefix
+- Decision: POST /qa returns 202 with check summary
+- Decision: GET /report serializes ORM findings via Pydantic model_validate
+- Files: api/routes/qa.py, api/app.py (router registration)
+
+## Task-017: Admin Config Endpoints
+- Status: COMPLETED
+- Decision: Singleton QAConfig dataclass (in-memory, runtime-mutable)
+- Decision: GET/PUT /admin/config on existing admin router
+- Decision: Default thresholds: min_completeness=95%, max_kw=10000, max_gap=180min, top_n=10
+- Files: api/routes/admin.py (extended), services/qa/config.py
+
+## Task-018: QA Tests + Phase 3 Integration Test
+- Status: COMPLETED
+- Decision: 18 unit tests for all 9 checks (test_qa_checks.py)
+- Decision: 12 API tests including 409 wrong-status, 404 not-found, admin config (test_qa_api.py)
+- Decision: 2 E2E tests: full pipeline + gap detection (integration/test_phase3.py)
+- Decision: Realistic kWh values (5-23 range) to stay under 10000 kW threshold
+- Files: tests/test_qa_checks.py, tests/test_qa_api.py, tests/integration/test_phase3.py
+
+## PHASE 3 COMPLETE — STOPP
+All 6 tasks completed. 129 tests passing (32 new). Awaiting approval for Phase 4.
+
+### Phase 3 Summary
+- **9 QA checks**: interval completeness, completeness %, gaps/duplicates, daily/monthly energy, peak load, baseload, load factor, hourly/weekday profile, DST conformity
+- **QA orchestration**: auto-detects interval, saves findings to analysis.quality_findings, advances job state
+- **5 new QA endpoints**: POST /qa, GET status/report/findings/profile
+- **2 admin endpoints**: GET/PUT /admin/config
+- **129 tests** all passing
+- **QA is read-only** on time series (ADR-001 respected)
