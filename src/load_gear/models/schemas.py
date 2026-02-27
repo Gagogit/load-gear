@@ -225,3 +225,93 @@ class AdminConfigResponse(BaseModel):
     top_n_peaks: int = 10
     min_completeness_pct: float = 95.0
     max_gap_duration_min: int = 180
+
+
+# --- Analysis & Imputation schemas (P4) ---
+
+
+class AnalysisRunRequest(BaseModel):
+    """POST /api/v1/analysis request body."""
+
+    job_id: uuid.UUID
+
+
+class AnalysisStatusResponse(BaseModel):
+    """GET /api/v1/analysis/{job_id}/status response."""
+
+    job_id: uuid.UUID
+    status: str
+    current_phase: str | None = None
+    sub_phase: str | None = None  # P4.1 / P4.2 / P4.3 / P4.4
+    error_message: str | None = None
+
+
+class DayFingerprintEntry(BaseModel):
+    """Single day-type fingerprint."""
+
+    avg_kw: list[float]  # 24 hourly averages
+    count: int
+
+
+class AnalysisProfileResponse(BaseModel):
+    """GET /api/v1/analysis/{job_id}/profile response."""
+
+    job_id: uuid.UUID
+    meter_id: str
+    day_fingerprints: dict[str, DayFingerprintEntry] | None = None
+    seasonality: dict | None = None
+    weather_correlations: dict | None = None
+    asset_hints: dict | None = None
+    impute_policy: dict | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DayLabelEntry(BaseModel):
+    """Single day classification result."""
+
+    date: str
+    label: str
+    confidence: float
+
+
+class DayLabelsResponse(BaseModel):
+    """GET /api/v1/analysis/{job_id}/day-labels response."""
+
+    job_id: uuid.UUID
+    labels: list[DayLabelEntry]
+    total: int
+
+
+class WeatherFeatureEntry(BaseModel):
+    """Weather feature for a single timestamp."""
+
+    ts_utc: datetime
+    temp_c: float | None = None
+    ghi_wm2: float | None = None
+    confidence: float | None = None
+
+
+class WeatherResponse(BaseModel):
+    """GET /api/v1/analysis/{job_id}/weather response."""
+
+    job_id: uuid.UUID
+    features: list[WeatherFeatureEntry]
+    correlations: dict | None = None
+
+
+class ImputationReportResponse(BaseModel):
+    """GET /api/v1/analysis/{job_id}/imputation response."""
+
+    job_id: uuid.UUID
+    slots_replaced: int
+    method_summary: dict  # {profile: n, interpolation: n, weather: n}
+    total_v2_rows: int
+
+
+class NormalizedV2Response(BaseModel):
+    """GET /api/v1/analysis/{job_id}/normalized-v2 response."""
+
+    items: list[NormalizedRowResponse]
+    total: int
