@@ -214,8 +214,8 @@ Started: 2026-02-27
 - Decision: Realistic kWh values (5-23 range) to stay under 10000 kW threshold
 - Files: tests/test_qa_checks.py, tests/test_qa_api.py, tests/integration/test_phase3.py
 
-## PHASE 3 COMPLETE — STOPP
-All 6 tasks completed. 129 tests passing (32 new). Awaiting approval for Phase 4.
+## PHASE 3 COMPLETE
+All 6 tasks completed. 129 tests passing (32 new).
 
 ### Phase 3 Summary
 - **9 QA checks**: interval completeness, completeness %, gaps/duplicates, daily/monthly energy, peak load, baseload, load factor, hourly/weekday profile, DST conformity
@@ -224,3 +224,73 @@ All 6 tasks completed. 129 tests passing (32 new). Awaiting approval for Phase 4
 - **2 admin endpoints**: GET/PUT /admin/config
 - **129 tests** all passing
 - **QA is read-only** on time series (ADR-001 respected)
+
+---
+
+# Phase 4 — Analysis & Imputation
+Started: 2026-02-27
+
+## Task-019: Analysis Pydantic Schemas + Repositories
+- Status: COMPLETED
+- Decision: 9 Pydantic models: AnalysisRunRequest, AnalysisStatusResponse, AnalysisProfileResponse, DayFingerprintEntry, DayLabelEntry, DayLabelsResponse, WeatherResponse, ImputationReportResponse, NormalizedV2Response
+- Decision: Two new repos: analysis_profile_repo (create, get_by_job_id, update), imputation_run_repo (create, get_by_job_id, get_latest)
+- Files: repositories/analysis_profile_repo.py, repositories/imputation_run_repo.py, models/schemas.py (extended)
+
+## Task-020: Day Classification Service (P4.1)
+- Status: COMPLETED
+- Decision: 7 day types: Werktag-Sommer, Werktag-Winter, Samstag, Sonntag, Feiertag, Brückentag, Störung
+- Decision: German federal holidays computed dynamically via Easter algorithm (Anonymous Gregorian)
+- Decision: Bridge day verification: load comparison >20% drop vs normal weekday reference
+- Decision: Störung detection: daily load <10% of average weekday
+- Decision: Summer months = April–September (for Sommer/Winter split)
+- Decision: 24-hour avg kW fingerprints per day type
+- Files: services/analysis/day_classifier.py
+- Tests: 9 unit tests
+
+## Task-021: Weather Enrichment + Asset Fingerprint Stubs (P4.2/P4.3)
+- Status: COMPLETED
+- Decision: Weather enrichment returns empty correlations when no weather data available
+- Decision: Interface designed for future PostGIS KNN joins (weather_data param)
+- Decision: Correlation computation via NumPy corrcoef when data available
+- Decision: Asset fingerprinting stub per ADR-005: returns {"asset_hints": None}
+- Files: services/analysis/weather_enrichment.py, services/analysis/asset_fingerprint.py
+
+## Task-022: Imputation Engine (P4.4)
+- Status: COMPLETED
+- Decision: Priority chain: profile-based (flag=2) → linear interpolation (flag=1)
+- Decision: Weather-based (flag=3) and asset-adjusted skipped in v0.1
+- Decision: Gaps > max_gap_min (default 1440 min = 1 day) are not imputed
+- Decision: v2 rows include all original values (flag=0) plus imputed slots
+- Decision: Linear interpolation finds nearest before/after neighbors
+- Files: services/analysis/imputer.py
+- Tests: 6 unit tests
+
+## Task-023: Analysis Orchestration Service + API
+- Status: COMPLETED
+- Decision: Orchestrator runs P4.1→P4.2→P4.3→P4.4 sequentially, sets current_phase per sub-phase
+- Decision: Creates AnalysisProfile with day_fingerprints, seasonality, weather_correlations, impute_policy
+- Decision: Creates ImputationRun record tracking slots_replaced and method_summary
+- Decision: Job state after analysis: Prognose/Aggregation tasks → forecast_running; else → done
+- Decision: 7 endpoints on /api/v1/analysis prefix (POST, GET status/profile/day-labels/weather/imputation/normalized-v2)
+- Files: services/analysis/analysis_service.py, api/routes/analysis.py, api/app.py (router registration)
+
+## Task-024: Phase 4 Tests + Integration Test
+- Status: COMPLETED
+- Decision: 9 unit tests for day classifier (holidays, seasons, Störung, bridge days)
+- Decision: 6 unit tests for imputer (no gaps, profile fill, interpolation, large gaps, empty input)
+- Decision: 11 API integration tests (POST/GET endpoints, 404/409 errors, job state advancement)
+- Decision: 2 E2E tests: full pipeline with gap + complete data without imputation
+- Files: tests/test_day_classifier.py, tests/test_imputer.py, tests/test_analysis_api.py, tests/integration/test_phase4.py
+
+## PHASE 4 COMPLETE — STOPP
+All 6 tasks completed. 157 tests passing (28 new). Awaiting approval for Phase 5.
+
+### Phase 4 Summary
+- **Day Classification (P4.1)**: 7 day types, German holiday detection, bridge day verification, Störung detection
+- **Weather Enrichment (P4.2)**: Interface ready, stub in v0.1 (no weather data)
+- **Asset Fingerprinting (P4.3)**: Stub per ADR-005
+- **Imputation (P4.4)**: Profile-based + linear interpolation chain, quality flags 0-3
+- **7 new API endpoints**: POST /analysis, GET status/profile/day-labels/weather/imputation/normalized-v2
+- **v2 series**: Written to data.meter_reads (version=2) with lineage tracking via imputation_runs
+- **157 tests** all passing
+- **Analysis owns v2** (ADR-001 respected)

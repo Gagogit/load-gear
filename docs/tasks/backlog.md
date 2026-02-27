@@ -30,11 +30,16 @@
 20. [x] Task-017 — Admin Config Endpoints (GET/PUT /admin/config)
 21. [x] Task-018 — QA Tests + Phase 3 Integration Test (129 tests total)
 
-STOPP — Freigabe für Phase 4 erforderlich
-
 ## Phase 4 — Analysis & Imputation (P4: Day Classification, Weather, v2)
 
-(to be planned after Phase 3 approval)
+22. [x] Task-019 — Analysis Pydantic Schemas + Repositories (analysis_profile_repo, imputation_run_repo)
+23. [x] Task-020 — Day Classification Service (P4.1: 7 day types, German holidays, bridge days, Störung detection)
+24. [x] Task-021 — Weather Enrichment + Asset Fingerprint Stubs (P4.2/P4.3, ADR-005)
+25. [x] Task-022 — Imputation Engine (P4.4: profile-based + linear interpolation, quality flags 0-3, v2 writes)
+26. [x] Task-023 — Analysis Orchestration Service + API (7 endpoints on /api/v1/analysis)
+27. [x] Task-024 — Phase 4 Tests + Integration Test (157 tests total)
+
+STOPP — Freigabe für Phase 5 erforderlich
 
 ## Phase 5 — Forecast (P5: Prophet Integration)
 
