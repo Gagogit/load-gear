@@ -33,6 +33,7 @@ def impute(
     job_id: uuid.UUID,
     source_file_id: uuid.UUID | None = None,
     max_gap_min: int = 1440,
+    weather_observations: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Run imputation chain on v1 rows and produce v2 rows.
 
@@ -47,11 +48,12 @@ def impute(
         job_id: parent job
         source_file_id: original file
         max_gap_min: don't impute gaps longer than this
+        weather_observations: optional hourly weather data for flag=3 imputation
 
     Returns:
         (v2_rows, method_summary)
         - v2_rows: list of dicts ready for meter_reads insertion (version=2)
-        - method_summary: {"profile": n, "interpolation": n, "original": n}
+        - method_summary: {"profile": n, "interpolation": n, "original": n, "weather": n}
     """
     if not v1_rows:
         return [], {"profile": 0, "interpolation": 0, "original": 0}
@@ -101,6 +103,13 @@ def impute(
         if gap_duration <= max_gap_min:
             imputable.update(gap)
 
+    # Build weather lookup by hour (for flag=3 imputation)
+    weather_by_hour: dict[datetime, dict] = {}
+    if weather_observations:
+        for w in weather_observations:
+            ts_h = w["ts_utc"].replace(minute=0, second=0, microsecond=0)
+            weather_by_hour[ts_h] = w
+
     # Build v2 rows
     v2_rows: list[dict] = []
     method_counts = defaultdict(int)
@@ -126,6 +135,7 @@ def impute(
                 ts, existing, day_fingerprints, label_by_date,
                 weather_correlations, asset_hints,
                 hours_per_interval=hours_per_interval,
+                weather_by_hour=weather_by_hour,
             )
             v2_rows.append({
                 "ts_utc": ts,
@@ -164,8 +174,14 @@ def _impute_slot(
     asset_hints: dict | None,
     *,
     hours_per_interval: float,
+    weather_by_hour: dict[datetime, dict] | None = None,
 ) -> tuple[float, int]:
     """Impute a single missing slot using the priority chain.
+
+    Priority:
+    1. Weather-adjusted profile (flag=3) — profile base + temp/GHI regression
+    2. Day-type profile (flag=2) — average for hour + day label
+    3. Linear interpolation (flag=1) — between nearest neighbors
 
     Returns (value_kwh, quality_flag).
     """
@@ -173,22 +189,37 @@ def _impute_slot(
     date_str = ts_local.date().isoformat()
     hour = ts_local.hour
 
-    # Priority 1: Day-type profile
+    # Get profile base value (used by Priority 1 and 2)
+    profile_value: float | None = None
     label = label_by_date.get(date_str)
     if label and label in day_fingerprints:
         fp = day_fingerprints[label]
         avg_kw = fp.get("avg_kw", [])
         if avg_kw and hour < len(avg_kw) and avg_kw[hour] > 0:
-            # Convert avg kW back to kWh for the interval
-            value = avg_kw[hour] * hours_per_interval
-            return round(value, 4), 2  # profile-based
+            profile_value = avg_kw[hour] * hours_per_interval
 
-    # Priority 2: Weather-sensitive — skip if no data (v0.1)
-    # Future: adjust profile value by weather regression
+    # Priority 1: Weather-adjusted profile (flag=3)
+    # Adjusts profile value using temp/GHI sensitivity from P4.2
+    if (
+        profile_value is not None
+        and weather_by_hour
+        and weather_correlations
+        and weather_correlations.get("data_available")
+    ):
+        ts_hour = ts.replace(minute=0, second=0, microsecond=0)
+        w = weather_by_hour.get(ts_hour)
+        if w is not None:
+            adjusted = _weather_adjust(
+                profile_value, w, weather_correlations, hours_per_interval,
+            )
+            if adjusted is not None:
+                return round(adjusted, 4), 3  # weather-based
 
-    # Priority 3: Asset-adjusted — skip (stub, ADR-005)
+    # Priority 2: Day-type profile (flag=2)
+    if profile_value is not None:
+        return round(profile_value, 4), 2  # profile-based
 
-    # Priority 4: Linear interpolation
+    # Priority 3: Linear interpolation (flag=1)
     value = _linear_interpolate(ts, existing)
     if value is not None:
         return round(value, 4), 1  # interpolated
@@ -196,6 +227,48 @@ def _impute_slot(
     # Last resort: use overall mean
     all_values = [r["value"] for r in existing.values()]
     return round(float(np.mean(all_values)), 4), 1
+
+
+def _weather_adjust(
+    base_value: float,
+    weather: dict,
+    correlations: dict,
+    hours_per_interval: float,
+) -> float | None:
+    """Adjust a profile-based value using weather regression.
+
+    Uses temp_sensitivity and ghi_sensitivity to shift the base value
+    proportionally to the deviation of actual weather from average conditions.
+
+    The adjustment is: base * (1 + sensitivity * normalized_deviation)
+    where normalized_deviation = (actual - mean) / std.
+    """
+    temp_sens = correlations.get("temp_sensitivity")
+    ghi_sens = correlations.get("ghi_sensitivity")
+
+    if temp_sens is None and ghi_sens is None:
+        return None
+
+    adjustment = 0.0
+
+    # Temperature adjustment
+    if temp_sens is not None and weather.get("temp_c") is not None:
+        # Use 15°C as baseline average temperature
+        # Sensitivity is correlation coefficient: scale adjustment to ±10%
+        temp_dev = (weather["temp_c"] - 15.0) / 15.0  # normalized
+        adjustment += temp_sens * temp_dev * 0.1
+
+    # GHI adjustment
+    if ghi_sens is not None and weather.get("ghi_wm2") is not None:
+        # Use 200 W/m² as baseline average GHI
+        ghi_dev = (weather["ghi_wm2"] - 200.0) / 200.0  # normalized
+        adjustment += ghi_sens * ghi_dev * 0.1
+
+    # Clamp adjustment to ±30% to prevent unreasonable values
+    adjustment = max(-0.3, min(0.3, adjustment))
+
+    adjusted = base_value * (1.0 + adjustment)
+    return max(0.0, adjusted)  # energy values can't be negative
 
 
 def _linear_interpolate(

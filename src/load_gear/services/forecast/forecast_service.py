@@ -21,7 +21,11 @@ from load_gear.repositories import (
 from load_gear.services.forecast.prophet_trainer import train_and_predict
 from load_gear.services.forecast.strategies.calendar_mapping import apply_calendar_mapping
 from load_gear.services.forecast.strategies.dst_correct import apply_dst_correction
-from load_gear.services.forecast.strategies.scaling import apply_scaling
+from load_gear.services.forecast.strategies.scaling import (
+    apply_scaling,
+    apply_weather_conditioned,
+    apply_asset_scenarios,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +158,17 @@ async def run_forecast(
         if "scaling" in strategies:
             growth_pct = payload.get("scenarios", {}).get("growth_pct", 0.0) if payload.get("scenarios") else 0.0
             predictions = apply_scaling(predictions, growth_pct=growth_pct)
+        if "weather_conditioned" in strategies:
+            predictions = apply_weather_conditioned(
+                predictions,
+                weather_correlations=profile.weather_correlations,
+            )
+        if "asset_scenarios" in strategies:
+            predictions = apply_asset_scenarios(
+                predictions,
+                asset_hints=profile.asset_hints,
+                scenarios=payload.get("scenarios"),
+            )
 
         # 9. Bulk-insert ForecastSeries rows
         series_rows = [

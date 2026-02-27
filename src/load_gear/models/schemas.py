@@ -478,3 +478,68 @@ class FinancialResultResponse(BaseModel):
     total_cost_eur: float
     monthly_summary: list[MonthlySummaryEntry]
     rows: list[CostRowResponse]
+
+
+# --- Weather schemas (P7) ---
+
+
+class WeatherImportRequest(BaseModel):
+    """POST /api/v1/weather/import request body."""
+
+    station_id: str = Field(..., max_length=20, description="DWD station ID (e.g. 00433)")
+    lat: float = Field(..., ge=-90, le=90, description="Station latitude")
+    lon: float = Field(..., ge=-180, le=180, description="Station longitude")
+    params: list[str] = Field(
+        default_factory=lambda: ["air_temperature", "solar"],
+        description="DWD parameters to import",
+    )
+    start: datetime | None = Field(None, description="Optional start filter (UTC)")
+    end: datetime | None = Field(None, description="Optional end filter (UTC)")
+
+
+class WeatherImportResponse(BaseModel):
+    """POST /api/v1/weather/import response."""
+
+    station_id: str
+    total_inserted: int
+    counts_per_param: dict[str, int]
+
+
+class WeatherStationInfo(BaseModel):
+    """Station summary in list responses."""
+
+    station_id: str
+    obs_count: int
+    earliest: datetime | None = None
+    latest: datetime | None = None
+    source: str
+
+
+class WeatherStationListResponse(BaseModel):
+    """GET /api/v1/weather/stations response."""
+
+    items: list[WeatherStationInfo]
+    total: int
+
+
+class WeatherObservationRow(BaseModel):
+    """Single weather observation in API responses."""
+
+    ts_utc: datetime
+    station_id: str
+    temp_c: float | None = None
+    ghi_wm2: float | None = None
+    wind_ms: float | None = None
+    cloud_pct: float | None = None
+    confidence: float | None = None
+    source: str
+
+    model_config = {"from_attributes": True}
+
+
+class WeatherObservationListResponse(BaseModel):
+    """GET /api/v1/weather/stations/{station_id}/observations response."""
+
+    station_id: str
+    items: list[WeatherObservationRow]
+    total: int

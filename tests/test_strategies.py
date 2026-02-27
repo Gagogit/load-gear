@@ -167,15 +167,82 @@ def test_apply_scaling_no_change() -> None:
     assert result[0]["y_hat"] == original
 
 
-def test_weather_conditioned_stub() -> None:
-    """Weather stub returns rows unchanged."""
-    rows = [{"y_hat": 10.0}]
-    result = apply_weather_conditioned(rows)
-    assert result[0]["y_hat"] == 10.0
+def test_weather_conditioned_no_correlations() -> None:
+    """No weather correlations returns rows unchanged."""
+    rows = _make_forecast_rows(
+        datetime(2025, 1, 6, 0, 0, tzinfo=timezone.utc),
+        hours=1, interval_minutes=60, base_value=10.0,
+    )
+    original = rows[0]["y_hat"]
+    result = apply_weather_conditioned(rows, weather_correlations=None)
+    assert result[0]["y_hat"] == original
 
 
-def test_asset_scenarios_stub() -> None:
-    """Asset scenarios stub returns rows unchanged."""
-    rows = [{"y_hat": 10.0}]
-    result = apply_asset_scenarios(rows)
-    assert result[0]["y_hat"] == 10.0
+def test_weather_conditioned_with_data() -> None:
+    """Weather conditioning adjusts values when correlations + observations provided."""
+    start = datetime(2025, 1, 6, 0, 0, tzinfo=timezone.utc)
+    rows = _make_forecast_rows(start, hours=3, interval_minutes=60, base_value=100.0)
+
+    correlations = {"temp_sensitivity": 0.8, "ghi_sensitivity": -0.5, "data_available": True}
+    weather_obs = [
+        {"ts_utc": start + timedelta(hours=h), "temp_c": 25.0, "ghi_wm2": 400.0}
+        for h in range(3)
+    ]
+
+    result = apply_weather_conditioned(
+        rows, weather_correlations=correlations, weather_observations=weather_obs,
+    )
+    # Values should be adjusted (not equal to original 100.0)
+    assert result[0]["y_hat"] != 100.0
+
+
+def test_asset_scenarios_no_hints() -> None:
+    """No asset hints or scenarios returns rows unchanged."""
+    rows = _make_forecast_rows(
+        datetime(2025, 1, 6, 0, 0, tzinfo=timezone.utc),
+        hours=1, interval_minutes=60, base_value=10.0,
+    )
+    original = rows[0]["y_hat"]
+    result = apply_asset_scenarios(rows, asset_hints=None, scenarios=None)
+    assert result[0]["y_hat"] == original
+
+
+def test_asset_scenarios_pv_reduces_midday() -> None:
+    """PV scenario reduces midday load."""
+    start = datetime(2025, 6, 2, 11, 0, tzinfo=timezone.utc)  # 11:00 UTC
+    rows = _make_forecast_rows(start, hours=4, interval_minutes=60, base_value=50.0)
+
+    result = apply_asset_scenarios(
+        rows,
+        asset_hints={"detected_assets": ["pv"]},
+        scenarios={"pv_capacity_kwp": 10.0},
+    )
+    # Midday values should be reduced
+    assert result[0]["y_hat"] < 50.0
+
+
+def test_asset_scenarios_kwk_winter_offset() -> None:
+    """KWK scenario reduces load in winter months."""
+    start = datetime(2025, 1, 6, 12, 0, tzinfo=timezone.utc)  # January
+    rows = _make_forecast_rows(start, hours=1, interval_minutes=60, base_value=50.0)
+
+    result = apply_asset_scenarios(
+        rows,
+        asset_hints={"detected_assets": ["kwk"]},
+        scenarios={"kwk_output_kw": 5.0},
+    )
+    assert result[0]["y_hat"] == pytest.approx(45.0)
+
+
+def test_asset_scenarios_battery_night_charge() -> None:
+    """Battery scenario increases night load (charging)."""
+    start = datetime(2025, 1, 6, 23, 0, tzinfo=timezone.utc)  # 23:00
+    rows = _make_forecast_rows(start, hours=1, interval_minutes=60, base_value=10.0)
+
+    result = apply_asset_scenarios(
+        rows,
+        asset_hints={"detected_assets": ["battery"]},
+        scenarios={"battery_capacity_kwh": 16.0},
+    )
+    # Night load should increase (charging)
+    assert result[0]["y_hat"] > 10.0

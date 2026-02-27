@@ -17,9 +17,10 @@ from load_gear.repositories import (
     quality_finding_repo,
 )
 from load_gear.services.analysis.day_classifier import classify_days
-from load_gear.services.analysis.weather_enrichment import enrich_weather
+from load_gear.services.analysis.weather_enrichment import enrich_weather, enrich_weather_async
 from load_gear.services.analysis.asset_fingerprint import detect_assets
 from load_gear.services.analysis.imputer import impute
+from load_gear.services.weather.geocoding import geocode_plz_safe
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +90,27 @@ async def run_analysis(
         job.current_phase = "P4.2"
         await session.flush()
 
-        weather_correlations = enrich_weather(row_dicts, weather_data=None)
+        # Resolve location: payload lat/lon > PLZ geocoding
+        lat = (job.payload or {}).get("lat")
+        lon = (job.payload or {}).get("lon")
+        if lat is None or lon is None:
+            coords = geocode_plz_safe(job.plz)
+            if coords is not None:
+                lat, lon = coords
 
-        # --- P4.3: Asset Fingerprinting (STUB) ---
+        # Use real PostGIS join when location is available, else sync stub
+        if lat is not None and lon is not None:
+            weather_correlations = await enrich_weather_async(
+                session, row_dicts, lat=lat, lon=lon,
+            )
+        else:
+            weather_correlations = enrich_weather(row_dicts, weather_data=None)
+
+        # --- P4.3: Asset Fingerprinting ---
         job.current_phase = "P4.3"
         await session.flush()
 
-        asset_result = detect_assets(row_dicts)
+        asset_result = detect_assets(row_dicts, weather_correlations=weather_correlations)
         asset_hints = asset_result.get("asset_hints")
 
         # --- Save analysis profile ---
