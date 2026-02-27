@@ -390,3 +390,91 @@ class ForecastSummaryResponse(BaseModel):
     q10: dict | None = None
     q50: dict | None = None
     q90: dict | None = None
+
+
+# --- HPFC schemas (P6) ---
+
+
+class HpfcUploadResponse(BaseModel):
+    """POST /api/v1/hpfc/upload response."""
+
+    snapshot_id: uuid.UUID
+    provider_id: str
+    rows_imported: int
+    delivery_start: datetime
+    delivery_end: datetime
+
+
+class HpfcSnapshotResponse(BaseModel):
+    """Single HPFC snapshot metadata."""
+
+    id: uuid.UUID
+    provider_id: str
+    snapshot_at: datetime
+    curve_type: str
+    delivery_start: datetime
+    delivery_end: datetime
+    currency: str
+    file_id: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class HpfcSnapshotListResponse(BaseModel):
+    """GET /api/v1/hpfc response."""
+
+    items: list[HpfcSnapshotResponse]
+    total: int
+
+
+class HpfcSeriesResponse(BaseModel):
+    """Single HPFC series data point."""
+
+    ts_utc: datetime
+    price_mwh: float
+
+
+class HpfcSeriesListResponse(BaseModel):
+    """GET /api/v1/hpfc/{snapshot_id}/series response."""
+
+    snapshot_id: uuid.UUID
+    rows: list[HpfcSeriesResponse]
+    total: int
+
+
+# --- Financial schemas (P6) ---
+
+
+class FinancialCalcRequest(BaseModel):
+    """POST /api/v1/financial/calculate request body."""
+
+    job_id: uuid.UUID
+    snapshot_id: uuid.UUID | None = Field(None, description="Specific HPFC snapshot (auto if None)")
+
+
+class CostRowResponse(BaseModel):
+    """Single cost row in the time series."""
+
+    ts_utc: datetime
+    consumption_kwh: float
+    price_mwh: float
+    cost_eur: float
+
+
+class MonthlySummaryEntry(BaseModel):
+    """Monthly cost aggregation."""
+
+    month: str  # YYYY-MM
+    total_cost_eur: float
+    total_kwh: float
+    avg_price_mwh: float
+
+
+class FinancialResultResponse(BaseModel):
+    """GET /api/v1/financial/{job_id}/result response."""
+
+    calc_id: uuid.UUID
+    job_id: uuid.UUID
+    total_cost_eur: float
+    monthly_summary: list[MonthlySummaryEntry]
+    rows: list[CostRowResponse]

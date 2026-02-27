@@ -183,3 +183,34 @@ class HpfcSeries(Base):
         primary_key=True, nullable=False,
     )
     price_mwh: Mapped[float] = mapped_column(Double, nullable=False)
+
+
+class FinancialRun(Base):
+    """Cost calculation run: forecast × HPFC = cost series."""
+
+    __tablename__ = "financial_runs"
+    __table_args__ = (
+        Index("ix_financial_runs_job_id", "job_id"),
+        {"schema": "data"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("control.jobs.id"), nullable=False
+    )
+    forecast_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data.forecast_runs.id"), nullable=False
+    )
+    hpfc_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data.hpfc_snapshots.id"), nullable=False
+    )
+    meter_id: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="running", nullable=False)
+    total_cost_eur: Mapped[float | None] = mapped_column(Double)
+    monthly_summary: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

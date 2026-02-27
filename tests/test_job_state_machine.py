@@ -22,9 +22,13 @@ class TestValidTransitions:
         (JobStatus.ANALYSIS_RUNNING, JobStatus.DONE),
         (JobStatus.ANALYSIS_RUNNING, JobStatus.WARN),
         (JobStatus.ANALYSIS_RUNNING, JobStatus.FAILED),
+        (JobStatus.FORECAST_RUNNING, JobStatus.FINANCIAL_RUNNING),
         (JobStatus.FORECAST_RUNNING, JobStatus.DONE),
         (JobStatus.FORECAST_RUNNING, JobStatus.WARN),
         (JobStatus.FORECAST_RUNNING, JobStatus.FAILED),
+        (JobStatus.FINANCIAL_RUNNING, JobStatus.DONE),
+        (JobStatus.FINANCIAL_RUNNING, JobStatus.WARN),
+        (JobStatus.FINANCIAL_RUNNING, JobStatus.FAILED),
     ])
     def test_valid_transition_accepted(self, current: JobStatus, target: JobStatus) -> None:
         assert validate_transition(current, target) is True
@@ -45,6 +49,8 @@ class TestInvalidTransitions:
         (JobStatus.QA_RUNNING, JobStatus.PENDING),
         (JobStatus.ANALYSIS_RUNNING, JobStatus.QA_RUNNING),
         (JobStatus.FORECAST_RUNNING, JobStatus.ANALYSIS_RUNNING),
+        (JobStatus.FINANCIAL_RUNNING, JobStatus.FORECAST_RUNNING),
+        (JobStatus.FINANCIAL_RUNNING, JobStatus.PENDING),
         # Terminal states cannot transition
         (JobStatus.DONE, JobStatus.PENDING),
         (JobStatus.DONE, JobStatus.FAILED),

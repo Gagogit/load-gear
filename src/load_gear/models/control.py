@@ -31,6 +31,7 @@ class JobStatus(str, enum.Enum):
     QA_RUNNING = "qa_running"
     ANALYSIS_RUNNING = "analysis_running"
     FORECAST_RUNNING = "forecast_running"
+    FINANCIAL_RUNNING = "financial_running"
     DONE = "done"
     WARN = "warn"
     FAILED = "failed"

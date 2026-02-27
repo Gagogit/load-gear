@@ -17,7 +17,8 @@ VALID_TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
     JobStatus.INGESTING: {JobStatus.QA_RUNNING, JobStatus.FAILED},
     JobStatus.QA_RUNNING: {JobStatus.ANALYSIS_RUNNING, JobStatus.DONE, JobStatus.WARN, JobStatus.FAILED},
     JobStatus.ANALYSIS_RUNNING: {JobStatus.FORECAST_RUNNING, JobStatus.DONE, JobStatus.WARN, JobStatus.FAILED},
-    JobStatus.FORECAST_RUNNING: {JobStatus.DONE, JobStatus.WARN, JobStatus.FAILED},
+    JobStatus.FORECAST_RUNNING: {JobStatus.FINANCIAL_RUNNING, JobStatus.DONE, JobStatus.WARN, JobStatus.FAILED},
+    JobStatus.FINANCIAL_RUNNING: {JobStatus.DONE, JobStatus.WARN, JobStatus.FAILED},
     # Terminal states — no transitions out
     JobStatus.DONE: set(),
     JobStatus.WARN: set(),
@@ -30,7 +31,7 @@ TASK_TERMINAL_PHASE: dict[str, JobStatus] = {
     "Fehleranalyse": JobStatus.QA_RUNNING,
     "Imputation": JobStatus.ANALYSIS_RUNNING,
     "Prognose": JobStatus.FORECAST_RUNNING,
-    "Aggregation": JobStatus.FORECAST_RUNNING,  # P6 runs after forecast
+    "Aggregation": JobStatus.FINANCIAL_RUNNING,
 }
 
 

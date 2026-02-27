@@ -10,6 +10,9 @@ from load_gear.repositories import (
     imputation_run_repo,
     forecast_run_repo,
     forecast_series_repo,
+    hpfc_snapshot_repo,
+    hpfc_series_repo,
+    financial_run_repo,
 )
 
 __all__ = [
@@ -22,4 +25,7 @@ __all__ = [
     "imputation_run_repo",
     "forecast_run_repo",
     "forecast_series_repo",
+    "hpfc_snapshot_repo",
+    "hpfc_series_repo",
+    "financial_run_repo",
 ]

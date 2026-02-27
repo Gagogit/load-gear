@@ -175,8 +175,12 @@ async def run_forecast(
         run.completed_at = datetime.now(timezone.utc)
         await session.flush()
 
-        # 11. Advance job to done
-        job.status = JobStatus.DONE
+        # 11. Advance job state (to financial_running if Aggregation task, else done)
+        tasks = (job.payload or {}).get("tasks", [])
+        if "Aggregation" in tasks:
+            job.status = JobStatus.FINANCIAL_RUNNING
+        else:
+            job.status = JobStatus.DONE
         job.current_phase = None
         await session.flush()
 
