@@ -315,3 +315,78 @@ class NormalizedV2Response(BaseModel):
 
     items: list[NormalizedRowResponse]
     total: int
+
+
+# --- Forecast schemas (P5) ---
+
+
+class ForecastRunRequest(BaseModel):
+    """POST /api/v1/forecasts request body."""
+
+    job_id: uuid.UUID
+    horizon_start: datetime | None = Field(None, description="Start of forecast horizon (auto if None)")
+    horizon_end: datetime | None = Field(None, description="End of forecast horizon (auto if None)")
+    strategies: list[str] = Field(
+        default_factory=lambda: ["calendar_mapping", "dst_correct"],
+        description="Post-processing strategies to apply",
+    )
+    quantiles: list[float] = Field(
+        default_factory=lambda: [0.1, 0.5, 0.9],
+        description="Prediction quantiles (default: q10, q50, q90)",
+    )
+
+
+class ForecastRunResponse(BaseModel):
+    """Forecast run metadata."""
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    meter_id: str
+    status: str
+    horizon_start: datetime
+    horizon_end: datetime
+    quantiles: list[float] | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ForecastStatusResponse(BaseModel):
+    """GET /api/v1/forecasts/{job_id}/status response."""
+
+    job_id: uuid.UUID
+    status: str
+    current_phase: str | None = None
+    forecast_run_id: uuid.UUID | None = None
+    error_message: str | None = None
+
+
+class ForecastSeriesResponse(BaseModel):
+    """Single forecast series row."""
+
+    ts_utc: datetime
+    y_hat: float
+    q10: float | None = None
+    q50: float | None = None
+    q90: float | None = None
+
+
+class ForecastSeriesListResponse(BaseModel):
+    """GET /api/v1/forecasts/{job_id}/series response."""
+
+    job_id: uuid.UUID
+    forecast_id: uuid.UUID
+    rows: list[ForecastSeriesResponse]
+    total: int
+
+
+class ForecastSummaryResponse(BaseModel):
+    """GET /api/v1/forecasts/{job_id}/summary response."""
+
+    job_id: uuid.UUID
+    forecast_id: uuid.UUID
+    total_rows: int
+    y_hat: dict  # {min, max, mean}
+    q10: dict | None = None
+    q50: dict | None = None
+    q90: dict | None = None
