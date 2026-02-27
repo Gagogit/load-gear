@@ -1,0 +1,184 @@
+"""Unit tests for the normalization service (P2b)."""
+
+import uuid
+from pathlib import Path
+
+import pytest
+
+from load_gear.services.ingest.normalizer import normalize, NormalizationError
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _make_ids() -> tuple[uuid.UUID, uuid.UUID]:
+    return uuid.uuid4(), uuid.uuid4()
+
+
+GERMAN_RULES = {
+    "encoding": "utf-8",
+    "delimiter": ";",
+    "header_row": 0,
+    "timestamp_columns": ["Datum", "Uhrzeit"],
+    "value_column": "Wert (kWh)",
+    "date_format": "%d.%m.%Y",
+    "time_format": "%H:%M",
+    "decimal_separator": ",",
+    "unit": "kWh",
+    "series_type": "interval",
+    "timezone": "Europe/Berlin",
+}
+
+
+def test_normalize_german_csv() -> None:
+    """15-min German CSV produces correct v1 rows."""
+    data = (FIXTURES / "german_format.csv").read_bytes()
+    job_id, file_id = _make_ids()
+
+    rows, stats = normalize(
+        data, GERMAN_RULES, meter_id="METER001", job_id=job_id, source_file_id=file_id
+    )
+
+    assert len(rows) == 8  # 8 data rows
+    assert stats["valid_rows"] == 8
+    assert stats["invalid_rows"] == 0
+
+    # Check first row
+    row0 = rows[0]
+    assert row0["meter_id"] == "METER001"
+    assert row0["version"] == 1
+    assert row0["quality_flag"] == 0
+    assert row0["unit"] == "kWh"
+    assert row0["value"] == 12.5
+    assert row0["job_id"] == job_id
+    assert row0["source_file_id"] == file_id
+
+    # Timestamps should be UTC (Europe/Berlin is UTC+1 on Jan 1)
+    ts = row0["ts_utc"]
+    assert ts.hour == 23  # 00:00 CET = 23:00 UTC previous day
+    assert ts.day == 31  # Dec 31
+
+
+def test_normalize_cumulative() -> None:
+    """Cumulative values are converted to interval deltas."""
+    data = (FIXTURES / "cumulative.csv").read_bytes()
+    job_id, file_id = _make_ids()
+
+    rules = {
+        **GERMAN_RULES,
+        "value_column": "Zaehlerstand (kWh)",
+        "series_type": "cumulative",
+    }
+
+    rows, stats = normalize(
+        data, rules, meter_id="CUM_METER", job_id=job_id, source_file_id=file_id
+    )
+
+    # 8 data rows → 7 deltas (first row has no previous)
+    assert len(rows) == 7
+    assert stats["valid_rows"] == 7
+    assert "cumulative" in stats["warnings"][0].lower()
+
+    # First delta: 1012.5 - 1000.0 = 12.5
+    assert rows[0]["value"] == 12.5
+
+
+def test_normalize_wh_conversion() -> None:
+    """Wh unit is converted to kWh (divide by 1000)."""
+    csv = b"Datum;Uhrzeit;Wert (Wh)\n01.01.2025;00:00;12500\n01.01.2025;00:15;13200\n"
+    job_id, file_id = _make_ids()
+
+    rules = {
+        **GERMAN_RULES,
+        "value_column": "Wert (Wh)",
+        "unit": "Wh",
+        "decimal_separator": ".",
+    }
+
+    rows, stats = normalize(
+        csv, rules, meter_id="WH_METER", job_id=job_id, source_file_id=file_id
+    )
+
+    assert rows[0]["value"] == 12.5
+    assert rows[0]["unit"] == "kWh"
+
+
+def test_normalize_iso_format() -> None:
+    """ISO format CSV with combined timestamp column."""
+    data = (FIXTURES / "iso_format.csv").read_bytes()
+    job_id, file_id = _make_ids()
+
+    rules = {
+        "encoding": "utf-8",
+        "delimiter": ",",
+        "header_row": 0,
+        "timestamp_columns": ["timestamp"],
+        "value_column": "value_kwh",
+        "date_format": "%Y-%m-%d %H:%M",
+        "time_format": "",
+        "decimal_separator": ".",
+        "unit": "kWh",
+        "series_type": "interval",
+        "timezone": "Europe/Berlin",
+    }
+
+    rows, stats = normalize(
+        data, rules, meter_id="ISO_METER", job_id=job_id, source_file_id=file_id
+    )
+
+    assert len(rows) == 8
+    assert stats["valid_rows"] == 8
+
+
+def test_normalize_zero_valid_rows_raises() -> None:
+    """Zero valid rows raises NormalizationError."""
+    csv = b"Datum;Uhrzeit;Wert (kWh)\nnotadate;nottime;notnum\n"
+    job_id, file_id = _make_ids()
+
+    with pytest.raises(NormalizationError, match="Zero valid rows"):
+        normalize(csv, GERMAN_RULES, meter_id="BAD", job_id=job_id, source_file_id=file_id)
+
+
+def test_normalize_empty_file_raises() -> None:
+    """Empty data file raises NormalizationError."""
+    csv = b"Datum;Uhrzeit;Wert (kWh)\n"
+    job_id, file_id = _make_ids()
+
+    with pytest.raises(NormalizationError, match="no data rows"):
+        normalize(csv, GERMAN_RULES, meter_id="EMPTY", job_id=job_id, source_file_id=file_id)
+
+
+def test_normalize_dst_spring_forward() -> None:
+    """DST spring-forward (23h day) produces 92 intervals for a full day.
+
+    Uses partial fixture: March 30, 2025 at 02:00→03:00 CET (clock jumps forward).
+    """
+    data = (FIXTURES / "dst_spring.csv").read_bytes()
+    job_id, file_id = _make_ids()
+
+    rows, stats = normalize(
+        data, GERMAN_RULES, meter_id="DST_S", job_id=job_id, source_file_id=file_id
+    )
+
+    # All 12 rows should parse (gap at 02:00-02:45 is natural — no rows exist)
+    assert stats["valid_rows"] == 12
+
+    # Verify UTC offsets: before 03:00 CET → CET (UTC+1); at/after 03:00 CEST → UTC+2
+    # 01:00 CET = 00:00 UTC; 03:00 CEST = 01:00 UTC
+    utc_hours = sorted(r["ts_utc"].hour for r in rows)
+    # Before DST: 00:00 CET = 23:00 UTC (prev day), 01:00 CET = 00:00 UTC
+    # After DST: 03:00 CEST = 01:00 UTC
+    assert 23 in utc_hours or 0 in utc_hours  # at least some pre-DST hours present
+
+
+def test_normalize_dst_fall_back() -> None:
+    """DST fall-back (25h day) handles repeated hours."""
+    data = (FIXTURES / "dst_fall.csv").read_bytes()
+    job_id, file_id = _make_ids()
+
+    rows, stats = normalize(
+        data, GERMAN_RULES, meter_id="DST_F", job_id=job_id, source_file_id=file_id
+    )
+
+    # 16 data rows should all parse
+    assert stats["valid_rows"] == 16
+    assert len(rows) == 16

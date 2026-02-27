@@ -1,0 +1,49 @@
+[project]
+name = "load-gear"
+version = "0.1.0"
+description = "LOAD-GEAR Energy Intelligence — meter data processing, forecasting, and financial calculation"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.10.0",
+    "pyyaml>=6.0",
+    "sqlalchemy[asyncio]>=2.0.35",
+    "psycopg[binary,pool]>=3.2.0",
+    "alembic>=1.14.0",
+    "polars>=1.15.0",
+    "numpy>=2.0.0",
+    "httpx>=0.28.0",
+    "python-multipart>=0.0.18",
+    "chardet>=5.0.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+forecast = [
+    "prophet>=1.1.6",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "aiosqlite>=0.20.0",
+]
+
+[project.scripts]
+load-gear = "load_gear.__main__:main"
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
