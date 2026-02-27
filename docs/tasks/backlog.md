@@ -39,11 +39,15 @@
 26. [x] Task-023 — Analysis Orchestration Service + API (7 endpoints on /api/v1/analysis)
 27. [x] Task-024 — Phase 4 Tests + Integration Test (157 tests total)
 
-STOPP — Freigabe für Phase 5 erforderlich
-
 ## Phase 5 — Forecast (P5: Prophet Integration)
 
-(to be planned after Phase 4 approval)
+28. [x] Task-025 — Forecast Pydantic Schemas + Repositories (forecast_run_repo, forecast_series_repo, 6 Pydantic models)
+29. [x] Task-026 — Prophet Training Service (P5.1: thread pool executor, German holidays, quantiles q10/q50/q90)
+30. [x] Task-027 — Strategy Implementation (P5.2: calendar mapping, DST correction, scaling + stubs)
+31. [x] Task-028 — Forecast Orchestration Service + API (5 endpoints on /api/v1/forecasts)
+32. [x] Task-029 — Phase 5 Tests + Integration Test (191 tests total)
+
+STOPP — Freigabe für Phase 6 erforderlich
 
 ## Phase 6 — Financial (P6: HPFC Cost Calculation)
 

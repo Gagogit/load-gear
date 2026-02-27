@@ -282,8 +282,8 @@ Started: 2026-02-27
 - Decision: 2 E2E tests: full pipeline with gap + complete data without imputation
 - Files: tests/test_day_classifier.py, tests/test_imputer.py, tests/test_analysis_api.py, tests/integration/test_phase4.py
 
-## PHASE 4 COMPLETE — STOPP
-All 6 tasks completed. 157 tests passing (28 new). Awaiting approval for Phase 5.
+## PHASE 4 COMPLETE
+All 6 tasks completed. 157 tests passing (28 new).
 
 ### Phase 4 Summary
 - **Day Classification (P4.1)**: 7 day types, German holiday detection, bridge day verification, Störung detection
@@ -294,3 +294,68 @@ All 6 tasks completed. 157 tests passing (28 new). Awaiting approval for Phase 5
 - **v2 series**: Written to data.meter_reads (version=2) with lineage tracking via imputation_runs
 - **157 tests** all passing
 - **Analysis owns v2** (ADR-001 respected)
+
+---
+
+# Phase 5 — Forecast (Prophet Integration)
+Started: 2026-02-27
+
+## Task-025: Forecast Pydantic Schemas + Repositories
+- Status: COMPLETED
+- Decision: 6 Pydantic models: ForecastRunRequest, ForecastRunResponse, ForecastStatusResponse, ForecastSeriesResponse, ForecastSeriesListResponse, ForecastSummaryResponse
+- Decision: forecast_run_repo (create, get_by_id, get_by_job_id, update_status)
+- Decision: forecast_series_repo (bulk_insert, get_by_forecast_id paginated, get_summary with aggregates)
+- Decision: Updated repositories/__init__.py to export all 9 repos
+- Files: repositories/forecast_run_repo.py, repositories/forecast_series_repo.py, models/schemas.py (extended)
+
+## Task-026: Prophet Training Service (P5.1)
+- Status: COMPLETED
+- Decision: Prophet runs in thread pool executor via asyncio.run_in_executor (ADR-003)
+- Decision: Pandas only at Prophet boundary (DataFrame conversion in/out), all public API uses dicts
+- Decision: German federal holidays + bridge days fed as Prophet holidays DataFrame
+- Decision: Uncertainty interval (80% width) maps to q10/q90; q50 = yhat
+- Decision: Seasonality flags (daily/weekly/yearly) read from analysis_profile
+- Files: services/forecast/prophet_trainer.py
+
+## Task-027: Strategy Implementation (P5.2)
+- Status: COMPLETED
+- Decision: 3 strategy modules as post-processing on Prophet output
+- Decision: calendar_mapping — blends Prophet forecast with day-class fingerprints (30% blend weight)
+- Decision: dst_correct — adjusts interval count on DST transition days (spring: trim, fall: pad)
+- Decision: scaling — applies linear growth % and constant load shift kW
+- Decision: Weather-conditioned + asset scenarios = stubs (log warning, return unchanged)
+- Decision: Nearest-neighbor fallback for missing day types in calendar mapping
+- Files: services/forecast/strategies/calendar_mapping.py, dst_correct.py, scaling.py
+
+## Task-028: Forecast Orchestration Service + API
+- Status: COMPLETED
+- Decision: Orchestrator validates forecast_running state, fetches v2 + analysis_profile
+- Decision: data_snapshot_id = SHA-256 of first 100 v2 rows (reproducibility)
+- Decision: Default horizon: last data point + horizon_months (from job payload, default 1 month)
+- Decision: ForecastRun record tracks strategies, quantiles, model_alias, snapshot
+- Decision: Job state after forecast: done (or failed on error)
+- Decision: 5 endpoints on /api/v1/forecasts: POST trigger, GET status/run/series/summary
+- Files: services/forecast/forecast_service.py, api/routes/forecasts.py, api/app.py (router registration)
+
+## Task-029: Phase 5 Tests + Integration Test
+- Status: COMPLETED
+- Decision: 6 Prophet trainer tests (holidays, train+predict sync/async, empty input)
+- Decision: 16 strategy tests (classify_date, fingerprint lookup, calendar blend, DST transitions, scaling, stubs)
+- Decision: 10 API integration tests (POST/GET endpoints, 404/409 errors, pagination, summary)
+- Decision: 2 E2E tests: full 5-phase pipeline + Imputation-only job skips forecast
+- Files: tests/test_prophet_trainer.py, tests/test_strategies.py, tests/test_forecast_api.py, tests/integration/test_phase5.py
+
+## PHASE 5 COMPLETE — STOPP
+All 5 tasks completed. 191 tests passing (34 new). Awaiting approval for Phase 6.
+
+### Phase 5 Summary
+- **Prophet Trainer (P5.1)**: Runs in thread pool, German holidays, configurable seasonality, quantiles q10/q50/q90
+- **Calendar Mapping**: Blends Prophet output with day-class fingerprints, nearest-neighbor fallback
+- **DST Correction**: Adjusts interval count on spring-forward/fall-back days
+- **Scaling**: Linear growth %, constant load shift
+- **Weather/Asset strategies**: Stubs (deferred — no weather data, P4.3 stub)
+- **5 new API endpoints**: POST /forecasts, GET status/run/series/summary
+- **v3 series**: Written to data.forecast_series with y_hat, q10, q50, q90
+- **Full pipeline**: job(Prognose) → ingest → QA → analysis → forecast → done
+- **191 tests** all passing
+- **Prophet in executor** (ADR-003 respected, event loop not blocked)
