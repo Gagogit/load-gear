@@ -345,8 +345,8 @@ Started: 2026-02-27
 - Decision: 2 E2E tests: full 5-phase pipeline + Imputation-only job skips forecast
 - Files: tests/test_prophet_trainer.py, tests/test_strategies.py, tests/test_forecast_api.py, tests/integration/test_phase5.py
 
-## PHASE 5 COMPLETE — STOPP
-All 5 tasks completed. 191 tests passing (34 new). Awaiting approval for Phase 6.
+## PHASE 5 COMPLETE
+All 5 tasks completed. 191 tests passing (34 new).
 
 ### Phase 5 Summary
 - **Prophet Trainer (P5.1)**: Runs in thread pool, German holidays, configurable seasonality, quantiles q10/q50/q90
@@ -359,3 +359,72 @@ All 5 tasks completed. 191 tests passing (34 new). Awaiting approval for Phase 6
 - **Full pipeline**: job(Prognose) → ingest → QA → analysis → forecast → done
 - **191 tests** all passing
 - **Prophet in executor** (ADR-003 respected, event loop not blocked)
+
+---
+
+# Phase 6 — Financial (HPFC Cost Calculation)
+Started: 2026-02-27
+
+## Task-030: Alembic Migration 004 + FinancialRun ORM Model
+- Status: COMPLETED
+- Decision: ALTER TYPE control.job_status ADD VALUE 'FINANCIAL_RUNNING' BEFORE 'DONE'
+- Decision: data.financial_runs table with FK to forecast_runs + hpfc_snapshots, JSONB monthly_summary
+- Decision: FORECAST_RUNNING → {FINANCIAL_RUNNING, DONE, WARN, FAILED} transition added
+- Decision: TASK_TERMINAL_PHASE maps "Aggregation" → FINANCIAL_RUNNING (was FORECAST_RUNNING placeholder)
+- Decision: forecast_service advances to FINANCIAL_RUNNING when job has Aggregation task
+- Files: alembic/versions/004_financial_schema.py, models/control.py, models/data.py, services/job_service.py, services/forecast/forecast_service.py
+
+## Task-031: HPFC + Financial Pydantic Schemas + Repositories
+- Status: COMPLETED
+- Decision: 8 Pydantic models: HpfcUploadResponse, HpfcSnapshotResponse, HpfcSnapshotListResponse, HpfcSeriesResponse, HpfcSeriesListResponse, FinancialCalcRequest, FinancialResultResponse, CostRowResponse, MonthlySummaryEntry
+- Decision: hpfc_snapshot_repo with get_latest_covering() for auto-matching forecast horizon
+- Decision: hpfc_series_repo with get_all_by_snapshot_id() (no pagination) for calculation
+- Decision: financial_run_repo with update_status() accepting total_cost_eur + monthly_summary
+- Files: repositories/hpfc_snapshot_repo.py, hpfc_series_repo.py, financial_run_repo.py, models/schemas.py
+
+## Task-032: HPFC Upload Service + API
+- Status: COMPLETED
+- Decision: Polars for CSV parsing (NO PANDAS) with semicolon + comma delimiter support
+- Decision: German decimal format (comma → dot conversion) on price column only
+- Decision: 5 timestamp formats tried in order (ISO T, ISO space, ISO short, German datetime, German short)
+- Decision: Column name normalization: ts_utc/timestamp/Zeitstempel/datum/date + price_mwh/price/Preis/EUR_MWh
+- Decision: Duplicate timestamps rejected, negative prices allowed (spot market)
+- Decision: 5 endpoints: POST /hpfc/upload, GET /hpfc, GET /hpfc/{id}, GET /hpfc/{id}/series, DELETE /hpfc/{id}
+- Files: services/financial/hpfc_service.py, api/routes/hpfc.py
+
+## Task-033: Financial Calculation Service + API
+- Status: COMPLETED
+- Decision: Cost formula: cost_eur = (value_kw × hours_per_interval / 1000) × price_mwh
+- Decision: HPFC hourly prices aligned to forecast intervals via hour truncation (15-min → same hour price)
+- Decision: Monthly summaries aggregated with total_cost_eur, total_kwh, avg_price_mwh per YYYY-MM
+- Decision: Auto-snapshot selection via get_latest_covering() when snapshot_id not specified
+- Decision: CSV export with semicolon delimiter + UTF-8 BOM, XLSX via openpyxl (optional dep)
+- Decision: 3 endpoints: POST /financial/calculate, GET /financial/{id}/result, GET /financial/{id}/export
+- Files: services/financial/financial_service.py, api/routes/financial.py, api/app.py
+
+## Task-034: Phase 6 Tests + Integration Test
+- Status: COMPLETED
+- Decision: 7 HPFC service unit tests (semicolon/comma/German/ISO formats, missing columns, duplicates)
+- Decision: 8 financial calculator unit tests (cost formula, kW→kWh, NumPy vectorize, monthly aggregation, negative prices)
+- Decision: 8 HPFC API integration tests (upload/list/get/delete/pagination/404/422)
+- Decision: 8 financial API integration tests (calculate/result/export/404/409/done advancement)
+- Decision: 2 E2E tests: full 6-phase pipeline + Prognose-only job skips P6
+- Decision: Updated state machine tests with 5 new parametrized cases (FINANCIAL_RUNNING transitions)
+- Files: tests/test_hpfc_service.py, test_financial_calculator.py, test_hpfc_api.py, test_financial_api.py, integration/test_phase6.py, test_job_state_machine.py
+
+## PHASE 6 COMPLETE
+All 5 tasks completed. 230 tests passing (39 new).
+
+### Phase 6 Summary
+- **HPFC Upload**: Polars-based CSV parser, semicolon/comma/German decimal support, 5 timestamp formats
+- **HPFC CRUD**: Upload/list/get/delete with cascade series cleanup
+- **Cost Calculation**: Forecast × HPFC vector multiply, hourly→15min alignment, monthly aggregation
+- **CSV/XLSX Export**: Semicolon-delimited CSV with monthly summary section, openpyxl XLSX
+- **State Machine**: FINANCIAL_RUNNING state, Aggregation task routes through all 6 phases
+- **8 new API endpoints**: 5 HPFC + 3 financial
+- **1 new DB table**: data.financial_runs (with JSONB monthly_summary)
+- **1 new Alembic migration**: 004_financial_schema
+- **Full pipeline**: job(Aggregation) → ingest → QA → analysis → forecast → HPFC × forecast → done
+- **230 tests** all passing
+- **12 repositories** total (3 new: hpfc_snapshot, hpfc_series, financial_run)
+- **31 API endpoints** total (8 new)

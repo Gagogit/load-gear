@@ -47,8 +47,10 @@
 31. [x] Task-028 — Forecast Orchestration Service + API (5 endpoints on /api/v1/forecasts)
 32. [x] Task-029 — Phase 5 Tests + Integration Test (191 tests total)
 
-STOPP — Freigabe für Phase 6 erforderlich
-
 ## Phase 6 — Financial (P6: HPFC Cost Calculation)
 
-(to be planned after Phase 5 approval)
+33. [x] Task-030 — Alembic Migration 004 + FinancialRun ORM Model (FINANCIAL_RUNNING state, data.financial_runs table, state machine updates)
+34. [x] Task-031 — HPFC + Financial Pydantic Schemas + Repositories (8 Pydantic models, hpfc_snapshot_repo, hpfc_series_repo, financial_run_repo)
+35. [x] Task-032 — HPFC Upload Service + API (Polars CSV parser, 5 endpoints on /api/v1/hpfc)
+36. [x] Task-033 — Financial Calculation Service + API (forecast × HPFC vector multiply, monthly summaries, CSV/XLSX export, 3 endpoints on /api/v1/financial)
+37. [x] Task-034 — Phase 6 Tests + Integration Test (230 tests total)
