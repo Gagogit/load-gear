@@ -129,7 +129,7 @@ async def test_get_forecast_run(client: AsyncClient) -> None:
     resp = await client.get(f"/api/v1/forecasts/{job_id}/run")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["model_alias"] == "prophet"
+    assert data["model_alias"] == "day_match"
     assert data["status"] == "ok"
     assert data["data_snapshot_id"] is not None
 

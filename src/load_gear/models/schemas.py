@@ -331,7 +331,7 @@ class ForecastRunRequest(BaseModel):
     horizon_start: datetime | None = Field(None, description="Start of forecast horizon (auto if None)")
     horizon_end: datetime | None = Field(None, description="End of forecast horizon (auto if None)")
     strategies: list[str] = Field(
-        default_factory=lambda: ["calendar_mapping", "dst_correct"],
+        default_factory=lambda: ["dst_correct"],
         description="Post-processing strategies to apply",
     )
     quantiles: list[float] = Field(

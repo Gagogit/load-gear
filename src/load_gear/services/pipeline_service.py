@@ -43,8 +43,9 @@ async def run_pipeline(
     user_id: str,
     prognosis_from: datetime | None,
     prognosis_to: datetime | None,
-    file_content: bytes,
-    file_name: str,
+    growth_pct: float = 100.0,
+    file_content: bytes | None = None,
+    file_name: str = "upload.csv",
 ) -> dict:
     """Run the full pipeline: create job → upload → ingest → QA → analysis → forecast → [financial] → done.
 
@@ -66,12 +67,13 @@ async def run_pipeline(
     job = await create_job(session, request)
     job_id = job.id
 
-    # Store prognosis dates in payload
+    # Store prognosis dates and growth_pct in payload
     payload = job.payload or {}
     if prognosis_from:
         payload["prognosis_from"] = prognosis_from.isoformat()
     if prognosis_to:
         payload["prognosis_to"] = prognosis_to.isoformat()
+    payload["growth_pct"] = growth_pct
     job.payload = payload
     await session.flush()
 
@@ -118,6 +120,7 @@ async def run_pipeline(
                 job_id,
                 horizon_start=prognosis_from,
                 horizon_end=prognosis_to,
+                growth_pct=growth_pct,
             )
             job = await job_repo.get_job_by_id(session, job_id)
 

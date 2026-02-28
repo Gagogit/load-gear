@@ -1,7 +1,8 @@
 """P4.1 — Day Classification & Calendar Matching.
 
 Classifies each day in the v1 time series into one of:
-- Werktag-Sommer, Werktag-Winter, Samstag, Sonntag, Feiertag, Brückentag, Störung
+- Werktag-Sommer, Werktag-Winter, Werktag-nach-Frei, Werktag-vor-Frei,
+  Samstag, Sonntag, Feiertag, Brückentag, Störung
 
 Produces day_fingerprints (24-hour avg kW profiles per day type) and day_labels.
 """
@@ -55,6 +56,17 @@ def _get_federal_holidays(year: int) -> set[date]:
         easter_sun + timedelta(days=50),  # Pfingstmontag
     }
     return holidays
+
+
+def _is_non_workday(d: date, holidays: set[date]) -> bool:
+    """True if Sat/Sun/Feiertag/Brückentag."""
+    if d.weekday() >= 5:
+        return True
+    if d in holidays:
+        return True
+    if _is_bridge_day(d, holidays):
+        return True
+    return False
 
 
 def _is_bridge_day(d: date, holidays: set[date]) -> bool:
@@ -159,8 +171,16 @@ def classify_days(
         elif d.weekday() == 5:  # Saturday
             label = "Samstag"
         else:
-            is_summer = d.month in _SUMMER_MONTHS
-            label = "Werktag-Sommer" if is_summer else "Werktag-Winter"
+            # Check for Werktag-nach-Frei / Werktag-vor-Frei
+            prev_day = d - timedelta(days=1)
+            next_day = d + timedelta(days=1)
+            if _is_non_workday(prev_day, all_holidays):
+                label = "Werktag-nach-Frei"
+            elif _is_non_workday(next_day, all_holidays):
+                label = "Werktag-vor-Frei"
+            else:
+                is_summer = d.month in _SUMMER_MONTHS
+                label = "Werktag-Sommer" if is_summer else "Werktag-Winter"
 
         day_labels.append({
             "date": d.isoformat(),

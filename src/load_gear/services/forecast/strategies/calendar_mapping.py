@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from load_gear.services.analysis.day_classifier import (
     _get_federal_holidays,
     _is_bridge_day,
+    _is_non_workday,
     _SUMMER_MONTHS,
 )
 
@@ -23,8 +24,10 @@ _BERLIN = ZoneInfo("Europe/Berlin")
 
 # Day type similarity for nearest-neighbor fallback
 _SIMILAR_TYPES: dict[str, list[str]] = {
-    "Werktag-Sommer": ["Werktag-Winter", "Samstag", "Sonntag"],
-    "Werktag-Winter": ["Werktag-Sommer", "Samstag", "Sonntag"],
+    "Werktag-Sommer": ["Werktag-Winter", "Werktag-nach-Frei", "Werktag-vor-Frei", "Samstag", "Sonntag"],
+    "Werktag-Winter": ["Werktag-Sommer", "Werktag-nach-Frei", "Werktag-vor-Frei", "Samstag", "Sonntag"],
+    "Werktag-nach-Frei": ["Werktag-Winter", "Werktag-Sommer", "Werktag-vor-Frei", "Samstag"],
+    "Werktag-vor-Frei": ["Werktag-Winter", "Werktag-Sommer", "Werktag-nach-Frei", "Samstag"],
     "Samstag": ["Sonntag", "Feiertag", "Werktag-Sommer", "Werktag-Winter"],
     "Sonntag": ["Samstag", "Feiertag", "Werktag-Sommer", "Werktag-Winter"],
     "Feiertag": ["Sonntag", "Samstag", "Brückentag"],
@@ -43,6 +46,12 @@ def _classify_date(d: date, holidays: set[date]) -> str:
         return "Sonntag"
     if d.weekday() == 5:
         return "Samstag"
+    prev_day = d - timedelta(days=1)
+    next_day = d + timedelta(days=1)
+    if _is_non_workday(prev_day, holidays):
+        return "Werktag-nach-Frei"
+    if _is_non_workday(next_day, holidays):
+        return "Werktag-vor-Frei"
     return "Werktag-Sommer" if d.month in _SUMMER_MONTHS else "Werktag-Winter"
 
 

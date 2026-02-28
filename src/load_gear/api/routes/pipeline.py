@@ -37,6 +37,7 @@ async def pipeline_run(
     user_id: str = Form(""),
     prognosis_from: str = Form(""),
     prognosis_to: str = Form(""),
+    growth_pct: float = Form(100.0),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -66,6 +67,7 @@ async def pipeline_run(
         user_id=user_id,
         prognosis_from=p_from,
         prognosis_to=p_to,
+        growth_pct=growth_pct,
         file_content=file_content,
         file_name=file_name,
     )

@@ -1,4 +1,4 @@
-"""Forecast orchestration service: validate → fetch v2 → train Prophet → apply strategies → write v3."""
+"""Forecast orchestration service: validate → fetch v2 → day-type matching → apply strategies → write v3."""
 
 from __future__ import annotations
 
@@ -18,11 +18,9 @@ from load_gear.repositories import (
     forecast_run_repo,
     forecast_series_repo,
 )
-from load_gear.services.forecast.prophet_trainer import train_and_predict
-from load_gear.services.forecast.strategies.calendar_mapping import apply_calendar_mapping
+from load_gear.services.forecast.day_matcher import match_days
 from load_gear.services.forecast.strategies.dst_correct import apply_dst_correction
 from load_gear.services.forecast.strategies.scaling import (
-    apply_scaling,
     apply_weather_conditioned,
     apply_asset_scenarios,
 )
@@ -43,13 +41,14 @@ async def run_forecast(
     horizon_end: datetime | None = None,
     strategies: list[str] | None = None,
     quantiles: list[float] | None = None,
+    growth_pct: float = 100.0,
 ) -> dict:
     """Run full forecast pipeline: validate → fetch → train → strategies → write.
 
     Returns a summary dict.
     """
     if strategies is None:
-        strategies = ["calendar_mapping", "dst_correct"]
+        strategies = ["dst_correct"]
     if quantiles is None:
         quantiles = [0.1, 0.5, 0.9]
 
@@ -123,7 +122,7 @@ async def run_forecast(
             analysis_run_id=profile.id,
             horizon_start=horizon_start,
             horizon_end=horizon_end,
-            model_alias="prophet",
+            model_alias="day_match",
             data_snapshot_id=data_snapshot_id,
             strategies={"applied": strategies},
             quantiles={"values": quantiles},
@@ -131,33 +130,32 @@ async def run_forecast(
         )
         await forecast_run_repo.create(session, run)
 
-        # 7. Train Prophet in thread pool
+        # 7. Day-type matching forecast
         job.current_phase = "P5.1"
         await session.flush()
 
-        predictions = await train_and_predict(
+        # Use growth_pct from parameter, fallback to payload
+        pct = growth_pct
+        if pct == 100.0:
+            pct = payload.get("growth_pct", 100.0)
+
+        predictions = match_days(
             row_dicts,
-            horizon_start,
-            horizon_end,
-            seasonality,
-            quantiles,
-            interval_minutes,
+            horizon_start=horizon_start,
+            horizon_end=horizon_end,
+            interval_minutes=interval_minutes,
+            percentage=pct,
         )
 
         if not predictions:
-            raise ForecastError("Prophet returned no predictions")
+            raise ForecastError("Day matcher returned no predictions")
 
         # 8. Apply strategies
         job.current_phase = "P5.2"
         await session.flush()
 
-        if "calendar_mapping" in strategies:
-            predictions = apply_calendar_mapping(predictions, day_fingerprints)
         if "dst_correct" in strategies:
             predictions = apply_dst_correction(predictions, interval_minutes)
-        if "scaling" in strategies:
-            growth_pct = payload.get("scenarios", {}).get("growth_pct", 0.0) if payload.get("scenarios") else 0.0
-            predictions = apply_scaling(predictions, growth_pct=growth_pct)
         if "weather_conditioned" in strategies:
             predictions = apply_weather_conditioned(
                 predictions,

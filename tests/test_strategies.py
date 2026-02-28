@@ -46,16 +46,16 @@ def _make_forecast_rows(
 # --- Calendar Mapping ---
 
 def test_classify_date_weekday() -> None:
-    """Classify a normal Monday in January → Werktag-Winter."""
+    """Classify a normal Wednesday in January → Werktag-Winter."""
     from datetime import date
-    result = _classify_date(date(2025, 1, 6), set())  # Monday
+    result = _classify_date(date(2025, 1, 8), set())  # Wednesday
     assert result == "Werktag-Winter"
 
 
 def test_classify_date_summer_weekday() -> None:
-    """Classify a Monday in July → Werktag-Sommer."""
+    """Classify a Wednesday in July → Werktag-Sommer."""
     from datetime import date
-    result = _classify_date(date(2025, 7, 7), set())  # Monday
+    result = _classify_date(date(2025, 7, 9), set())  # Wednesday
     assert result == "Werktag-Sommer"
 
 

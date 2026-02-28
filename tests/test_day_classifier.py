@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from load_gear.services.analysis.day_classifier import classify_days, _get_federal_holidays, _easter
+from load_gear.services.analysis.day_classifier import classify_days, _get_federal_holidays, _easter, _is_non_workday
 
 
 def _make_rows(
@@ -81,11 +81,11 @@ def test_classify_holiday():
 
 
 def test_classify_summer():
-    """June weekday should be Werktag-Sommer."""
-    rows = _make_rows(days=1, start_date=datetime(2025, 6, 1, 22, 0, tzinfo=timezone.utc))
+    """June mid-week weekday should be Werktag-Sommer."""
+    # June 4, 2025 is Wednesday (prev=Tue, next=Thu — both workdays)
+    rows = _make_rows(days=1, start_date=datetime(2025, 6, 3, 22, 0, tzinfo=timezone.utc))
     _, labels = classify_days(rows)
     assert len(labels) >= 1
-    # June 2 is Monday (summer)
     summer_label = next((dl for dl in labels if "Sommer" in dl.get("label", "")), None)
     assert summer_label is not None
 
@@ -133,3 +133,34 @@ def test_stoerung_detection():
     jan11_label = next((dl for dl in labels if dl["date"] == "2025-01-11"), None)
     if jan11_label:
         assert jan11_label["label"] == "Störung"
+
+
+def test_classify_werktag_nach_frei():
+    """Monday after Sunday should be Werktag-nach-Frei."""
+    # 2025-01-13 is Monday (after Sunday Jan 12)
+    rows = _make_rows(days=14, start_date=datetime(2025, 1, 5, 23, 0, tzinfo=timezone.utc))
+    _, labels = classify_days(rows)
+    # Jan 13 is Monday, prev day is Sunday → Werktag-nach-Frei
+    mon_label = next((dl for dl in labels if dl["date"] == "2025-01-13"), None)
+    assert mon_label is not None
+    assert mon_label["label"] == "Werktag-nach-Frei"
+
+
+def test_classify_werktag_vor_frei():
+    """Friday before Saturday should be Werktag-vor-Frei."""
+    # 2025-01-10 is Friday (next day is Saturday Jan 11)
+    rows = _make_rows(days=14, start_date=datetime(2025, 1, 5, 23, 0, tzinfo=timezone.utc))
+    _, labels = classify_days(rows)
+    fri_label = next((dl for dl in labels if dl["date"] == "2025-01-10"), None)
+    assert fri_label is not None
+    assert fri_label["label"] == "Werktag-vor-Frei"
+
+
+def test_classify_midweek_still_werktag():
+    """Wednesday mid-week (no adjacent non-workday) should still be Werktag-Winter."""
+    # 2025-01-08 is Wednesday, prev=Tue, next=Thu — both workdays
+    rows = _make_rows(days=14, start_date=datetime(2025, 1, 5, 23, 0, tzinfo=timezone.utc))
+    _, labels = classify_days(rows)
+    wed_label = next((dl for dl in labels if dl["date"] == "2025-01-08"), None)
+    assert wed_label is not None
+    assert wed_label["label"] == "Werktag-Winter"

@@ -116,10 +116,10 @@ async def test_full_forecast_pipeline(client: AsyncClient) -> None:
     run_resp = await client.get(f"/api/v1/forecasts/{job_id}/run")
     assert run_resp.status_code == 200
     run_data = run_resp.json()
-    assert run_data["model_alias"] == "prophet"
+    assert run_data["model_alias"] == "day_match"
     assert run_data["status"] == "ok"
     assert run_data["data_snapshot_id"] is not None
-    assert run_data["strategies"] == {"applied": ["calendar_mapping", "dst_correct"]}
+    assert run_data["strategies"] == {"applied": ["dst_correct"]}
 
     # Step 9: Verify v3 series
     series_resp = await client.get(f"/api/v1/forecasts/{job_id}/series?limit=100")

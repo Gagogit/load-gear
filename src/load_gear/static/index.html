@@ -71,7 +71,7 @@ label {
   color: var(--text-muted);
   font-weight: 500;
 }
-input[type="text"], input[type="date"] {
+input[type="text"], input[type="date"], input[type="number"] {
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -226,6 +226,10 @@ button:disabled {
         <label for="prognosis_to">Prognose bis</label>
         <input type="date" id="prognosis_to">
       </div>
+      <div class="form-group">
+        <label for="growth_pct">Prozentwert</label>
+        <input type="number" id="growth_pct" value="100" min="0" max="500" step="0.1">
+      </div>
       <div class="form-group full">
         <label>Datei (CSV)</label>
         <div class="drop-zone" id="drop_zone">
@@ -368,6 +372,7 @@ button:disabled {
     form.append('user_id', $('user_id').value);
     form.append('prognosis_from', $('prognosis_from').value);
     form.append('prognosis_to', $('prognosis_to').value);
+    form.append('growth_pct', $('growth_pct').value);
     form.append('file', fileInput.files[0]);
 
     $('btn_upload').disabled = true;
