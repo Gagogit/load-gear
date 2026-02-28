@@ -35,12 +35,17 @@ _HEADER_KEYWORDS = {
     "timestamp", "datetime", "zeitstempel", "zeit",
     "zaehlerstand", "power", "energy", "periode",
     "zählerstand", "einheit", "unit", "kanal", "channel",
+    "last", "bezug", "einspeisung", "lieferung", "arbeit", "menge",
+    "wirkleistung", "von", "bis",
 }
 
 
 class ParseError(Exception):
     """Raised when file format cannot be determined."""
-    pass
+
+    def __init__(self, message: str, *, context: dict | None = None):
+        super().__init__(message)
+        self.context = context or {}
 
 
 FileType = Literal["csv", "xlsx", "xls"]
@@ -193,7 +198,7 @@ def detect_format(raw_bytes: bytes) -> dict:
         raise ParseError("No data rows found after header")
 
     # Column mapping
-    timestamp_cols, value_col, is_combined_ts = _map_columns(columns, data_rows)
+    timestamp_cols, value_col, is_combined_ts, col_unit = _map_columns(columns, data_rows)
 
     # Date/time format detection
     if is_combined_ts:
@@ -220,9 +225,12 @@ def detect_format(raw_bytes: bytes) -> dict:
 
     decimal_separator = detect_decimal_separator(value_samples)
 
-    # Unit detection from header row text
-    header_text = " ".join(columns)
-    unit = detect_unit(header_text)
+    # Unit detection: prefer column-name-based detection, fall back to header scan
+    if col_unit:
+        unit = col_unit
+    else:
+        header_text = " ".join(columns)
+        unit = detect_unit(header_text)
 
     # Series type
     parsed_values = _parse_values(value_samples, decimal_separator)
@@ -258,26 +266,41 @@ def _get_column_samples_from_rows(data_rows: list[list[str]], col_idx: int) -> l
 
 def _map_columns(
     columns: list[str], data_rows: list[list[str]]
-) -> tuple[list[str], str, bool]:
+) -> tuple[list[str], str, bool, str | None]:
     """Map columns to timestamp and value roles.
 
-    Returns (timestamp_columns, value_column, is_combined_timestamp).
+    Returns (timestamp_columns, value_column, is_combined_timestamp, detected_unit).
     """
     col_lower = [c.lower().strip() for c in columns]
 
-    ts_names = {"datum", "date", "timestamp", "zeit", "time", "datetime", "zeitstempel", "uhrzeit"}
-    value_names = {"wert", "value", "verbrauch", "leistung", "zaehlerstand", "power", "energy"}
+    ts_names = {"datum", "date", "timestamp", "zeit", "time", "datetime",
+                "zeitstempel", "uhrzeit", "von", "bis", "periode"}
+    value_names = {"wert", "value", "verbrauch", "leistung", "zaehlerstand",
+                   "power", "energy", "last", "bezug", "einspeisung",
+                   "lieferung", "arbeit", "menge", "wirkleistung"}
+
+    # Unit pattern for stripping _kW, _kWh style suffixes (requires separator)
+    _unit_re = re.compile(r"[\s_]+k?[wW]h?$|[\s_]+[mM][wW]h?$")
 
     timestamp_cols: list[str] = []
     value_col: str | None = None
     is_combined = False
+    detected_unit_from_col: str | None = None
 
     for i, name in enumerate(col_lower):
-        clean = re.sub(r"\s*\(.*\)", "", name).strip()
+        # Strip units aggressively: (kW), (kWh), [kW], [kWh], _kW, _kWh
+        clean = re.sub(r"\s*[\(\[].*?[\)\]]", "", name).strip()
+        clean = _unit_re.sub("", clean).strip()
         if clean in ts_names:
             timestamp_cols.append(columns[i])
-        elif any(vn in clean for vn in value_names):
+        elif clean in value_names or any(vn in clean for vn in value_names):
             value_col = columns[i]
+            # Detect kW vs kWh from original column name
+            name_upper = columns[i]
+            if re.search(r"[\(\[_\s]kWh[\)\]\s]?", name_upper, re.IGNORECASE):
+                detected_unit_from_col = "kWh"
+            elif re.search(r"[\(\[_\s]kW[\)\]\s]?", name_upper, re.IGNORECASE):
+                detected_unit_from_col = "kW"
 
     if len(timestamp_cols) == 1 and timestamp_cols[0].lower().strip() in (
         "timestamp", "datetime", "zeitstempel"
@@ -287,7 +310,9 @@ def _map_columns(
         sample = _get_column_samples_from_rows(
             data_rows, col_lower.index(timestamp_cols[0].lower().strip())
         )
-        if sample and " " in sample[0].strip():
+        if sample and (" " in sample[0].strip() or re.match(
+            r"\d{2}\.\d{2}\.\d{2,4}:\d", sample[0].strip()
+        )):
             is_combined = True
 
     # Fallback: positional heuristics
@@ -313,11 +338,17 @@ def _map_columns(
                     break
 
     if not timestamp_cols:
-        raise ParseError("Cannot identify timestamp column(s)")
+        raise ParseError(
+            "Cannot identify timestamp column(s)",
+            context={"columns": columns, "hint": "No column matched timestamp keywords"},
+        )
     if not value_col:
-        raise ParseError("Cannot identify value column")
+        raise ParseError(
+            "Cannot identify value column",
+            context={"columns": columns, "hint": "No column matched value keywords"},
+        )
 
-    return timestamp_cols, value_col, is_combined
+    return timestamp_cols, value_col, is_combined, detected_unit_from_col
 
 
 def _split_line(line: str, delimiter: str) -> list[str]:
@@ -337,7 +368,7 @@ def _is_numeric(s: str) -> bool:
 def _looks_like_date(s: str) -> bool:
     """Check if string looks like a date."""
     s = s.strip()
-    return bool(re.match(r"\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}", s))
+    return bool(re.match(r"\d{2}\.\d{2}\.\d{2,4}|\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}", s))
 
 
 def _looks_like_time(s: str) -> bool:
@@ -350,7 +381,7 @@ def _looks_like_datetime(s: str) -> bool:
     """Check if string looks like a combined datetime."""
     s = s.strip()
     return bool(re.match(
-        r"(\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4})[T ]\d{1,2}:\d{2}", s
+        r"(\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{2,4})[T :]\d{1,2}:\d{2}", s
     ))
 
 

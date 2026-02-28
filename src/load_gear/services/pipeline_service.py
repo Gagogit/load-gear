@@ -145,12 +145,18 @@ async def run_pipeline(
     except (IngestError, QAError, AnalysisError, ForecastError) as exc:
         # Job already marked as FAILED by the service
         leds = await get_led_status(session, job_id)
-        return {
+        result: dict = {
             "job_id": str(job_id),
             "status": "failed",
             "error_message": str(exc),
             "leds": leds,
         }
+        error_ctx = getattr(exc, "context", None)
+        if not error_ctx and exc.__cause__:
+            error_ctx = getattr(exc.__cause__, "context", None)
+        if error_ctx:
+            result["error_context"] = error_ctx
+        return result
     except Exception as exc:
         logger.exception(f"Pipeline failed for job {job_id}")
         job = await job_repo.get_job_by_id(session, job_id)

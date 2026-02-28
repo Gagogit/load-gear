@@ -17,7 +17,10 @@ logger = logging.getLogger(__name__)
 
 class NormalizationError(Exception):
     """Raised when normalization fails."""
-    pass
+
+    def __init__(self, message: str, *, context: dict | None = None):
+        super().__init__(message)
+        self.context = context or {}
 
 
 def normalize(
@@ -61,13 +64,32 @@ def normalize(
     try:
         df = _build_timestamps(df, timestamp_columns, date_format, time_format, tz_name)
     except Exception as exc:
-        raise NormalizationError(f"Timestamp parsing failed: {exc}") from exc
+        ts_samples = []
+        try:
+            ts_col = timestamp_columns[0]
+            if ts_col in df.columns:
+                ts_samples = df[ts_col].head(5).to_list()
+        except Exception:
+            pass
+        raise NormalizationError(
+            f"Timestamp parsing failed: {exc}",
+            context={"column": timestamp_columns, "sample_values": ts_samples},
+        ) from exc
 
     # Parse value column
     try:
         df = _parse_values(df, value_column, decimal_separator)
     except Exception as exc:
-        raise NormalizationError(f"Value parsing failed: {exc}") from exc
+        val_samples = []
+        try:
+            if value_column in df.columns:
+                val_samples = df[value_column].head(5).to_list()
+        except Exception:
+            pass
+        raise NormalizationError(
+            f"Value parsing failed: {exc}",
+            context={"column": value_column, "sample_values": val_samples},
+        ) from exc
 
     # Filter out rows with null timestamps or values
     before_filter = len(df)
@@ -80,7 +102,10 @@ def normalize(
 
     valid_rows = len(df)
     if valid_rows == 0:
-        raise NormalizationError("Zero valid rows after parsing — check format rules")
+        raise NormalizationError(
+            "Zero valid rows after parsing — check format rules",
+            context={"total_rows": total_rows},
+        )
 
     # Convert cumulative to interval if needed
     if series_type == "cumulative":

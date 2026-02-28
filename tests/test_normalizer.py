@@ -252,3 +252,56 @@ def test_normalize_csv_with_metadata() -> None:
     assert stats["valid_rows"] == 8
     assert rows[0]["value"] == 12.5
     assert rows[0]["meter_id"] == "META_METER"
+
+
+# --- 2-digit year normalization ---
+
+
+def test_normalize_two_digit_year() -> None:
+    """CSV with dd.mm.yy dates normalizes correctly."""
+    csv = (
+        b"Datum;Uhrzeit;Wert (kWh)\n"
+        b"01.01.25;00:00;12,5\n"
+        b"01.01.25;00:15;13,2\n"
+    )
+    job_id, file_id = _make_ids()
+    rules = {
+        **GERMAN_RULES,
+        "date_format": "%d.%m.%y",
+    }
+    rows, stats = normalize(
+        csv, rules, meter_id="YY_METER", job_id=job_id, source_file_id=file_id
+    )
+    assert len(rows) == 2
+    assert stats["valid_rows"] == 2
+    # 2025 parsed from 2-digit year
+    assert rows[0]["ts_utc"].year == 2024 or rows[0]["ts_utc"].year == 2025  # UTC may shift day
+
+
+def test_normalize_colon_datetime() -> None:
+    """CSV with dd.mm.yyyy:hh:mm combined timestamp normalizes correctly."""
+    csv = (
+        b"Zeitstempel;Wert (kWh)\n"
+        b"01.01.2025:00:00;12,5\n"
+        b"01.01.2025:00:15;13,2\n"
+    )
+    job_id, file_id = _make_ids()
+    rules = {
+        "encoding": "utf-8",
+        "delimiter": ";",
+        "header_row": 0,
+        "timestamp_columns": ["Zeitstempel"],
+        "value_column": "Wert (kWh)",
+        "date_format": "%d.%m.%Y:%H:%M",
+        "time_format": "",
+        "decimal_separator": ",",
+        "unit": "kWh",
+        "series_type": "interval",
+        "timezone": "Europe/Berlin",
+    }
+    rows, stats = normalize(
+        csv, rules, meter_id="COLON_METER", job_id=job_id, source_file_id=file_id
+    )
+    assert len(rows) == 2
+    assert stats["valid_rows"] == 2
+    assert rows[0]["value"] == 12.5

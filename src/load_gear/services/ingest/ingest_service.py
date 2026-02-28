@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 
 class IngestError(Exception):
     """Raised when ingest pipeline fails."""
-    pass
+
+    def __init__(self, message: str, *, context: dict | None = None):
+        super().__init__(message)
+        self.context = context or {}
 
 
 async def run_ingest(
@@ -126,7 +129,8 @@ async def run_ingest(
         job.error_message = str(exc)
         job.current_phase = None
         await session.flush()
-        raise IngestError(str(exc)) from exc
+        ctx = getattr(exc, "context", None) or {}
+        raise IngestError(str(exc), context=ctx) from exc
     except Exception as exc:
         job.status = JobStatus.FAILED
         job.error_message = f"Unexpected ingest error: {exc}"

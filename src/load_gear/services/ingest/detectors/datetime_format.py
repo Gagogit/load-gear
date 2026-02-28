@@ -11,6 +11,7 @@ DATE_FORMATS = [
     ("%Y-%m-%d", r"\d{4}-\d{2}-\d{2}"),          # ISO: YYYY-MM-DD
     ("%m/%d/%Y", r"\d{2}/\d{2}/\d{4}"),          # US: MM/DD/YYYY
     ("%d/%m/%Y", r"\d{2}/\d{2}/\d{4}"),          # EU: DD/MM/YYYY
+    ("%d.%m.%y", r"\d{2}\.\d{2}\.\d{2}"),        # German 2-digit year: DD.MM.YY
 ]
 
 TIME_FORMATS = [
@@ -24,6 +25,10 @@ DATETIME_FORMATS = [
     ("%Y-%m-%d %H:%M", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}"),
     ("%Y-%m-%dT%H:%M", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}"),
     ("%d.%m.%Y %H:%M", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}"),
+    ("%d.%m.%Y:%H:%M", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{2}"),          # colon separator
+    ("%d.%m.%Y:%H:%M:%S", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{2}:\d{2}"), # colon with seconds
+    ("%d.%m.%y %H:%M", r"\d{2}\.\d{2}\.\d{2}\s+\d{1,2}:\d{2}"),        # 2-digit year + time
+    ("%d.%m.%y:%H:%M", r"\d{2}\.\d{2}\.\d{2}:\d{1,2}:\d{2}"),          # 2-digit year + colon
 ]
 
 

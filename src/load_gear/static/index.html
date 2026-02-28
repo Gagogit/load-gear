@@ -165,6 +165,17 @@ button:disabled {
   color: var(--red);
   display: none;
 }
+.error-detail {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 0.5rem 0.7rem;
+  margin-top: 0.5rem;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 .spinner {
   display: inline-block;
   width: 16px;
@@ -300,9 +311,33 @@ button:disabled {
     }
   }
 
-  function showError(msg) {
+  function showError(msg, errorContext) {
     const box = $('error_box');
-    box.textContent = msg;
+    // Sanitize text to prevent XSS
+    const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    let html = '<div>' + esc(msg) + '</div>';
+    if (errorContext) {
+      let details = '';
+      if (errorContext.columns) {
+        details += 'Erkannte Spalten: ' + errorContext.columns.map(esc).join(', ') + '\n';
+      }
+      if (errorContext.column) {
+        details += 'Spalte: ' + esc(Array.isArray(errorContext.column) ? errorContext.column.join(', ') : errorContext.column) + '\n';
+      }
+      if (errorContext.hint) {
+        details += 'Hinweis: ' + esc(errorContext.hint) + '\n';
+      }
+      if (errorContext.sample_values && errorContext.sample_values.length) {
+        details += 'Beispieldaten: ' + errorContext.sample_values.map(esc).join(' | ') + '\n';
+      }
+      if (errorContext.total_rows !== undefined) {
+        details += 'Gesamtzeilen: ' + esc(errorContext.total_rows) + '\n';
+      }
+      if (details) {
+        html += '<div class="error-detail">' + details.trim() + '</div>';
+      }
+    }
+    box.innerHTML = html;
     box.style.display = 'block';
   }
 
@@ -353,7 +388,7 @@ button:disabled {
       if (data.leds) updateLeds(data.leds);
 
       if (data.status === 'failed') {
-        showError(data.error_message || 'Pipeline fehlgeschlagen');
+        showError(data.error_message || 'Pipeline fehlgeschlagen', data.error_context);
         setStatus('Fehlgeschlagen');
         // Mark last false LED as red
         markFailedLed(data.leds);
@@ -404,7 +439,7 @@ button:disabled {
       } else if (data.status === 'failed') {
         clearInterval(pollTimer);
         pollTimer = null;
-        showError(data.error_message || 'Pipeline fehlgeschlagen');
+        showError(data.error_message || 'Pipeline fehlgeschlagen', data.error_context);
         setStatus('Fehlgeschlagen');
         markFailedLed(data.leds);
       }

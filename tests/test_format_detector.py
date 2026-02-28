@@ -11,12 +11,14 @@ from load_gear.services.ingest.format_detector import (
     ParseError,
     _find_data_boundary,
     _csv_to_rows,
+    _map_columns,
 )
 from load_gear.services.ingest.detectors.encoding import detect_encoding
 from load_gear.services.ingest.detectors.delimiter import detect_delimiter
 from load_gear.services.ingest.detectors.datetime_format import (
     detect_date_format,
     detect_time_format,
+    detect_datetime_format,
 )
 from load_gear.services.ingest.detectors.numeric import detect_decimal_separator, detect_unit
 from load_gear.services.ingest.detectors.series_type import detect_series_type
@@ -300,3 +302,118 @@ def test_detect_xlsx_format() -> None:
     assert rules["time_format"] == "%H:%M"
     assert rules["decimal_separator"] == ","
     assert rules["unit"] == "kWh"
+
+
+# --- 2-digit year & colon datetime formats ---
+
+
+def test_detect_two_digit_year() -> None:
+    """dd.mm.yy date format is detected."""
+    samples = ["01.01.25", "02.01.25", "03.01.25"]
+    assert detect_date_format(samples) == "%d.%m.%y"
+
+
+def test_detect_colon_combined_datetime() -> None:
+    """dd.mm.yyyy:hh:mm combined datetime is detected."""
+    samples = ["01.01.2025:00:00", "01.01.2025:00:15", "01.01.2025:00:30"]
+    fmt, is_combined = detect_datetime_format(samples)
+    assert fmt == "%d.%m.%Y:%H:%M"
+    assert is_combined is True
+
+
+def test_detect_two_digit_year_full_csv() -> None:
+    """Full CSV with dd.mm.yy dates is detected correctly."""
+    csv = (
+        b"Datum;Uhrzeit;Wert (kWh)\n"
+        b"01.01.25;00:00;12,5\n"
+        b"01.01.25;00:15;13,2\n"
+        b"01.01.25;00:30;11,8\n"
+        b"01.01.25;00:45;12,1\n"
+        b"01.01.25;01:00;10,9\n"
+        b"01.01.25;01:15;11,4\n"
+        b"01.01.25;01:30;10,2\n"
+        b"01.01.25;01:45;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["date_format"] == "%d.%m.%y"
+    assert rules["time_format"] == "%H:%M"
+
+
+def test_detect_colon_combined_full_csv() -> None:
+    """Full CSV with dd.mm.yyyy:hh:mm combined timestamp."""
+    csv = (
+        b"Zeitstempel;Wert (kWh)\n"
+        b"01.01.2025:00:00;12,5\n"
+        b"01.01.2025:00:15;13,2\n"
+        b"01.01.2025:00:30;11,8\n"
+        b"01.01.2025:00:45;12,1\n"
+        b"01.01.2025:01:00;10,9\n"
+        b"01.01.2025:01:15;11,4\n"
+        b"01.01.2025:01:30;10,2\n"
+        b"01.01.2025:01:45;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["date_format"] == "%d.%m.%Y:%H:%M"
+    assert rules["time_format"] == ""
+
+
+# --- Expanded column detection ---
+
+
+def test_map_columns_leistung_kw() -> None:
+    """Column 'Leistung (kW)' is detected as value column with kW unit."""
+    columns = ["Datum", "Uhrzeit", "Leistung (kW)"]
+    data_rows = [
+        ["01.01.2025", "00:00", "50,3"],
+        ["01.01.2025", "00:15", "52,1"],
+    ]
+    ts_cols, val_col, is_combined, col_unit = _map_columns(columns, data_rows)
+    assert val_col == "Leistung (kW)"
+    assert col_unit == "kW"
+    assert "Datum" in ts_cols
+
+
+def test_map_columns_last() -> None:
+    """Column 'Last' is detected as value column."""
+    columns = ["Datum", "Uhrzeit", "Last"]
+    data_rows = [
+        ["01.01.2025", "00:00", "50,3"],
+        ["01.01.2025", "00:15", "52,1"],
+    ]
+    ts_cols, val_col, is_combined, col_unit = _map_columns(columns, data_rows)
+    assert val_col == "Last"
+
+
+def test_map_columns_bezug() -> None:
+    """Column 'Bezug' is detected as value column."""
+    columns = ["Datum", "Uhrzeit", "Bezug"]
+    data_rows = [
+        ["01.01.2025", "00:00", "50,3"],
+        ["01.01.2025", "00:15", "52,1"],
+    ]
+    ts_cols, val_col, is_combined, col_unit = _map_columns(columns, data_rows)
+    assert val_col == "Bezug"
+
+
+def test_map_columns_wirkleistung() -> None:
+    """Column 'Wirkleistung (kW)' is detected via substring match."""
+    columns = ["Datum", "Uhrzeit", "Wirkleistung (kW)"]
+    data_rows = [
+        ["01.01.2025", "00:00", "50,3"],
+        ["01.01.2025", "00:15", "52,1"],
+    ]
+    ts_cols, val_col, is_combined, col_unit = _map_columns(columns, data_rows)
+    assert val_col == "Wirkleistung (kW)"
+    assert col_unit == "kW"
+
+
+# --- ParseError context ---
+
+
+def test_parse_error_has_context() -> None:
+    """ParseError includes context dict with column info."""
+    csv = b"ColA;ColB;ColC\nabc;def;ghi\njkl;mno;pqr\n"
+    with pytest.raises(ParseError) as exc_info:
+        detect_format(csv)
+    assert exc_info.value.context
+    assert "columns" in exc_info.value.context
