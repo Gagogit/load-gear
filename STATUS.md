@@ -2,6 +2,16 @@
 
 Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 
+## Bugfix: Weather Observation Upsert (DONE)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| BF-01 | Fix `upsert_with_location` UniqueViolation on repeated pipeline runs | done |
+
+- **Root cause**: `weather_observation_repo.upsert_with_location()` used plain `session.add()` (INSERT), causing `UniqueViolation` on `(ts_utc, station_id)` PK when weather data already existed for a location
+- **Fix**: replaced with `pg_insert().on_conflict_do_update()` — re-runs now update existing rows instead of crashing
+- **Verified**: XLSX pipeline upload → all 10 LEDs green, 310 tests passing
+
 ## Ingest Rework — XLS/XLSX Support + Variable Header Detection (DONE)
 
 | Task | Description | Status |
