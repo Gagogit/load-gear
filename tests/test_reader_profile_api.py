@@ -22,18 +22,26 @@ async def client(app):
 
 async def _create_job_and_upload(client: AsyncClient) -> tuple[str, str]:
     """Helper: create job, upload CSV, return (job_id, file_id)."""
-    resp = await client.post("/api/v1/jobs", json={"meter_id": f"RP_API_{uuid.uuid4().hex[:8]}"})
+    uid = uuid.uuid4().hex[:8]
+    resp = await client.post("/api/v1/jobs", json={"meter_id": f"RP_API_{uid}"})
     job_id = resp.json()["id"]
 
-    import random
-    v = random.randint(1, 999)
+    # Embed uid as comment to guarantee unique SHA-256 per call
     csv_data = (
-        f"Datum;Uhrzeit;Wert (kWh)\n01.01.2025;00:00;{v},5\n"
-        f"01.01.2025;00:15;{v-1},2\n"
+        f"# {uid}\n"
+        f"Datum;Uhrzeit;Wert (kWh)\n"
+        f"01.01.2025;00:00;12,5\n"
+        f"01.01.2025;00:15;13,2\n"
+        f"01.01.2025;00:30;11,8\n"
+        f"01.01.2025;00:45;12,1\n"
+        f"01.01.2025;01:00;10,9\n"
+        f"01.01.2025;01:15;11,4\n"
+        f"01.01.2025;01:30;10,2\n"
+        f"01.01.2025;01:45;9,8\n"
     ).encode()
     upload_resp = await client.post(
         f"/api/v1/files/upload?job_id={job_id}",
-        files={"file": ("test.csv", csv_data, "text/csv")},
+        files={"file": (f"test_{uid}.csv", csv_data, "text/csv")},
     )
     file_id = upload_resp.json()["id"]
     return job_id, file_id
