@@ -168,7 +168,16 @@ async def run_forecast(
                 scenarios=payload.get("scenarios"),
             )
 
-        # 9. Bulk-insert ForecastSeries rows
+        # 9. Deduplicate by ts_utc (DST correction may create duplicates)
+        seen_ts: set[datetime] = set()
+        deduped: list[dict] = []
+        for p in predictions:
+            if p["ts_utc"] not in seen_ts:
+                seen_ts.add(p["ts_utc"])
+                deduped.append(p)
+        predictions = deduped
+
+        # 10. Bulk-insert ForecastSeries rows
         series_rows = [
             {
                 "ts_utc": p["ts_utc"],
@@ -183,12 +192,12 @@ async def run_forecast(
 
         inserted = await forecast_series_repo.bulk_insert(session, series_rows)
 
-        # 10. Update ForecastRun status
+        # 11. Update ForecastRun status
         run.status = "ok"
         run.completed_at = datetime.now(timezone.utc)
         await session.flush()
 
-        # 11. Advance job state (to financial_running if Aggregation task, else done)
+        # 12. Advance job state (to financial_running if Aggregation task, else done)
         tasks = (job.payload or {}).get("tasks", [])
         if "Aggregation" in tasks:
             job.status = JobStatus.FINANCIAL_RUNNING
