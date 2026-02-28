@@ -2,6 +2,26 @@
 
 Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 
+## Robust Column Detection + Parse Error Context (DONE)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| CD-01 | Extended date/time formats (2-digit year, colon separator) | done |
+| CD-02 | Expanded column keyword sets + substring matching | done |
+| CD-03 | Structured ParseError/NormalizationError with context dict | done |
+| CD-04 | Error context propagation through pipeline to frontend | done |
+| CD-05 | Frontend error detail display (columns, samples, hints) | done |
+| CD-06 | Tests (12 new → 321 total) | done |
+
+### Key Deliverables
+- **Date formats**: `dd.mm.yy` (2-digit year), `dd.mm.yyyy:hh:mm` (colon separator), 5 new format entries
+- **Column detection**: expanded to 11 timestamp keywords + 15 value keywords (Last, Bezug, Wirkleistung, Einspeisung, etc.)
+- **Substring matching**: "Wirkleistung" matches via "leistung" substring
+- **Unit from column name**: kW vs kWh detected from column header (e.g. "Leistung (kW)" → kW)
+- **Structured errors**: `ParseError.context` / `NormalizationError.context` with columns, sample_values, hints
+- **Frontend**: `.error-detail` box shows column names, sample data, hints in monospace; XSS-safe
+- **321 tests** all passing
+
 ## Bugfix: Weather Observation Upsert (DONE)
 
 | Task | Description | Status |
@@ -63,5 +83,5 @@ Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 - **9 job states**: PENDING → INGESTING → QA_RUNNING → ANALYSIS_RUNNING → FORECAST_RUNNING → FINANCIAL_RUNNING → DONE/WARN/FAILED
 - **35 API endpoints** across 10 routers
 - **13 repositories**
-- **292 tests** all passing
+- **321 tests** all passing
 - **Full pipeline**: job → ingest → QA → analysis (with weather + assets) → forecast → financial → done

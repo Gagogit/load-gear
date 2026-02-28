@@ -75,3 +75,12 @@
 50. [x] IR-05 — clevercsv fallback in delimiter detector
 51. [x] IR-06 — Normalizer XLS/XLSX reading path + `file_type` in rules dict
 52. [x] IR-07 — Test fixtures + 18 new tests (310 total)
+
+## Robust Column Detection + Parse Error Context
+
+53. [x] CD-01 — Extended date/time formats (2-digit year dd.mm.yy, colon separator dd.mm.yyyy:hh:mm)
+54. [x] CD-02 — Expanded column keyword sets + substring matching (Last, Bezug, Wirkleistung, etc.)
+55. [x] CD-03 — Structured ParseError/NormalizationError with context dict (columns, samples, hints)
+56. [x] CD-04 — Error context propagation through IngestError → pipeline response
+57. [x] CD-05 — Frontend error detail display (.error-detail box, XSS-safe)
+58. [x] CD-06 — Tests (12 new → 321 total)
