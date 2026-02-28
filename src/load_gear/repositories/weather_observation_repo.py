@@ -181,7 +181,7 @@ async def upsert_with_location(
     lat: float,
     lon: float,
 ) -> int:
-    """Bulk insert weather observations and set source_location via raw SQL.
+    """Upsert weather observations with ON CONFLICT DO UPDATE.
 
     Each row dict should have: ts_utc, station_id, temp_c, ghi_wm2, wind_ms,
     cloud_pct, confidence, source. The source_location GEOGRAPHY point is set
@@ -190,15 +190,28 @@ async def upsert_with_location(
     if not rows:
         return 0
 
-    # Insert via ORM first
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    point_wkt = f"SRID=4326;POINT({lon} {lat})"
+
     for row_data in rows:
-        wo = WeatherObservation(**row_data)
-        session.add(wo)
+        stmt = pg_insert(WeatherObservation).values(**row_data)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["ts_utc", "station_id"],
+            set_={
+                "temp_c": stmt.excluded.temp_c,
+                "ghi_wm2": stmt.excluded.ghi_wm2,
+                "wind_ms": stmt.excluded.wind_ms,
+                "cloud_pct": stmt.excluded.cloud_pct,
+                "confidence": stmt.excluded.confidence,
+                "source": stmt.excluded.source,
+            },
+        )
+        await session.execute(stmt)
     await session.flush()
 
-    # Set source_location for all inserted rows
+    # Set source_location for all upserted rows
     station_id = rows[0]["station_id"]
-    point_wkt = f"SRID=4326;POINT({lon} {lat})"
     await session.execute(
         text("""
             UPDATE data.weather_observations
