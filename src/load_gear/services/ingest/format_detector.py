@@ -63,33 +63,45 @@ def detect_file_type(raw_bytes: bytes) -> FileType:
     return "csv"
 
 
-def _xlsx_to_rows(raw_bytes: bytes) -> list[list[str]]:
-    """Read XLSX bytes into list of string rows."""
+def _xlsx_to_rows(raw_bytes: bytes) -> tuple[list[list[str]], list[int]]:
+    """Read XLSX bytes into list of string rows.
+
+    Returns (rows, line_numbers) where line_numbers[i] is the original
+    0-based row index for rows[i]. Blank rows are skipped.
+    """
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
     ws = wb.active
     rows: list[list[str]] = []
-    for row in ws.iter_rows():
+    line_numbers: list[int] = []
+    for row_idx, row in enumerate(ws.iter_rows()):
         str_row = [str(cell.value) if cell.value is not None else "" for cell in row]
         if any(c.strip() for c in str_row):
             rows.append(str_row)
+            line_numbers.append(row_idx)
     wb.close()
-    return rows
+    return rows, line_numbers
 
 
-def _xls_to_rows(raw_bytes: bytes) -> list[list[str]]:
-    """Read XLS bytes into list of string rows."""
+def _xls_to_rows(raw_bytes: bytes) -> tuple[list[list[str]], list[int]]:
+    """Read XLS bytes into list of string rows.
+
+    Returns (rows, line_numbers) where line_numbers[i] is the original
+    0-based row index for rows[i]. Blank rows are skipped.
+    """
     import xlrd
 
     wb = xlrd.open_workbook(file_contents=raw_bytes)
     ws = wb.sheet_by_index(0)
     rows: list[list[str]] = []
+    line_numbers: list[int] = []
     for rx in range(ws.nrows):
         str_row = [str(ws.cell_value(rx, cx)) for cx in range(ws.ncols)]
         if any(c.strip() for c in str_row):
             rows.append(str_row)
-    return rows
+            line_numbers.append(rx)
+    return rows, line_numbers
 
 
 def _csv_to_rows(
@@ -173,13 +185,11 @@ def detect_format(raw_bytes: bytes) -> dict:
     file_type = detect_file_type(raw_bytes)
 
     if file_type == "xlsx":
-        rows = _xlsx_to_rows(raw_bytes)
-        line_numbers = list(range(len(rows)))
+        rows, line_numbers = _xlsx_to_rows(raw_bytes)
         encoding = "utf-8"
         delimiter = ";"  # dummy for Excel
     elif file_type == "xls":
-        rows = _xls_to_rows(raw_bytes)
-        line_numbers = list(range(len(rows)))
+        rows, line_numbers = _xls_to_rows(raw_bytes)
         encoding = "utf-8"
         delimiter = ";"  # dummy for Excel
     else:

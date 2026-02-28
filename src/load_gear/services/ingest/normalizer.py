@@ -203,17 +203,30 @@ def _read_excel(raw_bytes: bytes, file_type: str, header_row: int) -> pl.DataFra
         raise NormalizationError("Excel file has fewer rows than expected header_row")
 
     columns = [c.strip() for c in all_rows[header_row]]
-    data_rows = all_rows[header_row + 1:]
+
+    # Skip blank rows in data portion
+    data_rows = [
+        row for row in all_rows[header_row + 1:]
+        if any(str(c).strip() for c in row)
+    ]
 
     if not data_rows:
         raise NormalizationError("File contains no data rows")
 
-    # Build DataFrame from rows
-    data_dict: dict[str, list[str]] = {col: [] for col in columns}
+    # Filter out empty column names (trailing empty cells in Excel)
+    valid_cols = [(i, col) for i, col in enumerate(columns) if col]
+    if not valid_cols:
+        raise NormalizationError(
+            f"No valid column names found at row {header_row}",
+            context={"columns": columns},
+        )
+
+    # Build DataFrame from rows using only valid columns
+    data_dict: dict[str, list[str]] = {col: [] for col in [vc[1] for vc in valid_cols]}
     for row in data_rows:
-        for i, col in enumerate(columns):
+        for i, col in valid_cols:
             val = row[i] if i < len(row) else ""
-            data_dict[col].append(val)
+            data_dict[col].append(str(val).strip())
 
     return pl.DataFrame(data_dict)
 
