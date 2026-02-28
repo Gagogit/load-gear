@@ -37,6 +37,9 @@ _HEADER_KEYWORDS = {
     "zählerstand", "einheit", "unit", "kanal", "channel",
     "last", "bezug", "einspeisung", "lieferung", "arbeit", "menge",
     "wirkleistung", "von", "bis",
+    "startzeit", "endzeit", "beginn", "ende", "start", "end",
+    "consumption", "load", "generation", "strom", "ertrag",
+    "export", "import",
 }
 
 
@@ -89,14 +92,23 @@ def _xls_to_rows(raw_bytes: bytes) -> list[list[str]]:
     return rows
 
 
-def _csv_to_rows(text: str, delimiter: str) -> list[list[str]]:
-    """Parse CSV text into list of string rows."""
+def _csv_to_rows(
+    text: str, delimiter: str
+) -> tuple[list[list[str]], list[int]]:
+    """Parse CSV text into list of string rows.
+
+    Returns (rows, line_numbers) where line_numbers[i] is the original
+    0-based line index for rows[i]. Empty/blank lines are skipped but
+    original positions are tracked so header_row maps to raw file lines.
+    """
     rows: list[list[str]] = []
+    line_numbers: list[int] = []
     reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    for row in reader:
+    for line_idx, row in enumerate(reader):
         if any(c.strip() for c in row):
             rows.append(row)
-    return rows
+            line_numbers.append(line_idx)
+    return rows, line_numbers
 
 
 def _find_data_boundary(rows: list[list[str]]) -> tuple[int, int]:
@@ -162,10 +174,12 @@ def detect_format(raw_bytes: bytes) -> dict:
 
     if file_type == "xlsx":
         rows = _xlsx_to_rows(raw_bytes)
+        line_numbers = list(range(len(rows)))
         encoding = "utf-8"
         delimiter = ";"  # dummy for Excel
     elif file_type == "xls":
         rows = _xls_to_rows(raw_bytes)
+        line_numbers = list(range(len(rows)))
         encoding = "utf-8"
         delimiter = ";"  # dummy for Excel
     else:
@@ -184,15 +198,18 @@ def detect_format(raw_bytes: bytes) -> dict:
             text = text[1:]
 
         delimiter = detect_delimiter(text)
-        rows = _csv_to_rows(text, delimiter)
+        rows, line_numbers = _csv_to_rows(text, delimiter)
 
     if len(rows) < 2:
         raise ParseError("File has fewer than 2 rows (need header + at least 1 data row)")
 
-    # Find header and data boundary
-    header_row, data_start = _find_data_boundary(rows)
-    columns = [c.strip() for c in rows[header_row]]
-    data_rows = rows[data_start:]
+    # Find header and data boundary (indices into filtered rows list)
+    header_row_idx, data_start_idx = _find_data_boundary(rows)
+    columns = [c.strip() for c in rows[header_row_idx]]
+    data_rows = rows[data_start_idx:]
+
+    # Map filtered-row index to raw line number for the normalizer
+    header_row = line_numbers[header_row_idx] if header_row_idx < len(line_numbers) else 0
 
     if not data_rows:
         raise ParseError("No data rows found after header")
@@ -274,10 +291,15 @@ def _map_columns(
     col_lower = [c.lower().strip() for c in columns]
 
     ts_names = {"datum", "date", "timestamp", "zeit", "time", "datetime",
-                "zeitstempel", "uhrzeit", "von", "bis", "periode"}
+                "zeitstempel", "uhrzeit", "von", "bis", "periode",
+                "startzeit", "endzeit", "beginn", "ende", "start", "end"}
     value_names = {"wert", "value", "verbrauch", "leistung", "zaehlerstand",
                    "power", "energy", "last", "bezug", "einspeisung",
-                   "lieferung", "arbeit", "menge", "wirkleistung"}
+                   "lieferung", "arbeit", "menge", "wirkleistung",
+                   "consumption", "load", "generation", "strom", "ertrag",
+                   "export", "import"}
+    # Keywords that mark the END of an interval (use start column instead)
+    _end_time_names = {"endzeit", "bis", "ende", "end"}
 
     # Unit pattern for stripping _kW, _kWh style suffixes (requires separator)
     _unit_re = re.compile(r"[\s_]+k?[wW]h?$|[\s_]+[mM][wW]h?$")
@@ -301,6 +323,41 @@ def _map_columns(
                 detected_unit_from_col = "kWh"
             elif re.search(r"[\(\[_\s]kW[\)\]\s]?", name_upper, re.IGNORECASE):
                 detected_unit_from_col = "kW"
+
+    # --- Handle start/end time pairs (e.g., Startzeit + Endzeit) ---
+    # If we have >2 timestamp columns, filter out end-time columns.
+    # Also handles the case of exactly 3 cols: date + start_time + end_time.
+    if len(timestamp_cols) > 2:
+        # Separate date-like and time-like columns
+        date_cols = []
+        time_cols = []
+        for tc in timestamp_cols:
+            tc_lower = tc.lower().strip()
+            tc_clean = re.sub(r"\s*[\(\[].*?[\)\]]", "", tc_lower).strip()
+            tc_clean = _unit_re.sub("", tc_clean).strip()
+            idx = columns.index(tc)
+            samples = _get_column_samples_from_rows(data_rows, idx)
+            if samples and _looks_like_time(samples[0].strip()):
+                time_cols.append(tc)
+            else:
+                date_cols.append(tc)
+
+        if len(time_cols) >= 2:
+            # Keep only start-time: remove columns matching end-time keywords
+            start_times = []
+            for tc in time_cols:
+                tc_clean = re.sub(r"\s*[\(\[].*?[\)\]]", "", tc.lower().strip()).strip()
+                tc_clean = _unit_re.sub("", tc_clean).strip()
+                if tc_clean not in _end_time_names:
+                    start_times.append(tc)
+            # If all time cols removed or none identified, keep the first one
+            if not start_times:
+                start_times = [time_cols[0]]
+            timestamp_cols = date_cols + start_times[:1]
+            logger.info(
+                "Start/end time pair detected: keeping %s, dropped end-time columns",
+                timestamp_cols,
+            )
 
     if len(timestamp_cols) == 1 and timestamp_cols[0].lower().strip() in (
         "timestamp", "datetime", "zeitstempel"
@@ -360,9 +417,19 @@ def _split_line(line: str, delimiter: str) -> list[str]:
 
 
 def _is_numeric(s: str) -> bool:
-    """Check if a string looks numeric (with either comma or dot decimal)."""
+    """Check if a string looks numeric (with either comma or dot decimal).
+
+    Handles:
+      - Simple: 12,5 / 12.5 / 125
+      - German thousands: 1.234,56 (dots as thousands, comma as decimal)
+      - English thousands: 1,234.56 (commas as thousands, dot as decimal)
+      - Negative: -12,5
+    """
     s = s.strip()
-    return bool(re.match(r"^-?\d+([.,]\d+)?$", s))
+    return bool(re.match(
+        r"^-?(\d{1,3}(\.\d{3})*,\d+|\d{1,3}(,\d{3})*\.\d+|\d+([.,]\d+)?)$",
+        s,
+    ))
 
 
 def _looks_like_date(s: str) -> bool:

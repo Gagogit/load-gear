@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select, func
+from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from load_gear.models.data import MeterRead
@@ -33,6 +33,26 @@ async def bulk_insert(
 
     await session.flush()
     return len(rows)
+
+
+async def delete_by_meter_version(
+    session: AsyncSession,
+    meter_id: str,
+    version: int,
+) -> int:
+    """Delete all meter reads for a given meter_id + version.
+
+    Used to clean up old data before re-ingesting the same meter.
+    Returns the number of rows deleted.
+    """
+    result = await session.execute(
+        delete(MeterRead).where(
+            MeterRead.meter_id == meter_id,
+            MeterRead.version == version,
+        )
+    )
+    await session.flush()
+    return result.rowcount
 
 
 async def get_by_job_id(

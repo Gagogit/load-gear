@@ -261,14 +261,25 @@ def _build_timestamps(
         )
 
     # Convert local time to UTC using Python datetime (handles DST correctly)
+    #
+    # DST fall-back disambiguation: during the ambiguous hour (e.g. 2024-10-27
+    # 02:00-02:59 in Europe/Berlin), fold=0 → CEST (first occurrence),
+    # fold=1 → CET (second occurrence).  We track seen UTC timestamps and
+    # flip to fold=1 on collision so both occurrences get distinct UTC values.
     ts_utc_values: list[datetime | None] = []
+    seen_utc: set[datetime] = set()
     for ts_local in df["ts_local"].to_list():
         if ts_local is None:
             ts_utc_values.append(None)
             continue
         try:
-            local_dt = ts_local.replace(tzinfo=tz)
+            local_dt = ts_local.replace(tzinfo=tz, fold=0)
             utc_dt = local_dt.astimezone(timezone.utc)
+            if utc_dt in seen_utc:
+                # DST fall-back collision: try the second occurrence (fold=1)
+                local_dt = ts_local.replace(tzinfo=tz, fold=1)
+                utc_dt = local_dt.astimezone(timezone.utc)
+            seen_utc.add(utc_dt)
             ts_utc_values.append(utc_dt)
         except Exception:
             ts_utc_values.append(None)

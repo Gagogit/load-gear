@@ -159,13 +159,17 @@ async def run_pipeline(
         return result
     except Exception as exc:
         logger.exception(f"Pipeline failed for job {job_id}")
-        job = await job_repo.get_job_by_id(session, job_id)
-        if job and job.status not in (JobStatus.DONE, JobStatus.WARN, JobStatus.FAILED):
-            job.status = JobStatus.FAILED
-            job.error_message = f"Pipeline error: {exc}"
-            job.current_phase = None
-            await session.flush()
-        leds = await get_led_status(session, job_id)
+        try:
+            job = await job_repo.get_job_by_id(session, job_id)
+            if job and job.status not in (JobStatus.DONE, JobStatus.WARN, JobStatus.FAILED):
+                job.status = JobStatus.FAILED
+                job.error_message = f"Pipeline error: {exc}"
+                job.current_phase = None
+                await session.flush()
+            leds = await get_led_status(session, job_id)
+        except Exception:
+            logger.exception("Failed to update job status after pipeline error")
+            leds = {str(i): False for i in range(1, 11)}
         return {
             "job_id": str(job_id),
             "status": "failed",

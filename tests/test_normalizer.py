@@ -172,7 +172,7 @@ def test_normalize_dst_spring_forward() -> None:
 
 
 def test_normalize_dst_fall_back() -> None:
-    """DST fall-back (25h day) handles repeated hours."""
+    """DST fall-back (25h day) handles repeated hours with distinct UTC timestamps."""
     data = (FIXTURES / "dst_fall.csv").read_bytes()
     job_id, file_id = _make_ids()
 
@@ -183,6 +183,13 @@ def test_normalize_dst_fall_back() -> None:
     # 16 data rows should all parse
     assert stats["valid_rows"] == 16
     assert len(rows) == 16
+
+    # All UTC timestamps must be unique (no DST collision duplicates)
+    utc_timestamps = [r["ts_utc"] for r in rows]
+    assert len(set(utc_timestamps)) == 16, (
+        f"Expected 16 unique UTC timestamps but got {len(set(utc_timestamps))} — "
+        f"DST fall-back disambiguation failed"
+    )
 
 
 # --- XLSX normalization ---

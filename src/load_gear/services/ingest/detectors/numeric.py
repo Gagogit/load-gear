@@ -9,16 +9,28 @@ def detect_decimal_separator(samples: list[str]) -> str:
     """Detect decimal separator from sample numeric strings.
 
     Returns ',' or '.'.
+
+    Handles thousands separators:
+      German: 1.234,56 → decimal=,  (dots are thousands)
+      English: 1,234.56 → decimal=. (commas are thousands)
     """
     comma_count = 0
     dot_count = 0
 
     for s in samples:
         s = s.strip()
-        # Count occurrences in numeric context (not thousands separator)
-        # A decimal separator appears once, followed by 1-3 digits at end
-        if re.match(r"^-?\d+,\d{1,3}$", s):
+        if not s:
+            continue
+        # German thousands format: 1.234,56 or 1.234.567,89
+        if re.match(r"^-?\d{1,3}(\.\d{3})*,\d{1,3}$", s):
             comma_count += 1
+        # Simple comma decimal: 12,5
+        elif re.match(r"^-?\d+,\d{1,3}$", s):
+            comma_count += 1
+        # English thousands format: 1,234.56 or 1,234,567.89
+        elif re.match(r"^-?\d{1,3}(,\d{3})*\.\d{1,3}$", s):
+            dot_count += 1
+        # Simple dot decimal: 12.5
         elif re.match(r"^-?\d+\.\d{1,3}$", s):
             dot_count += 1
 

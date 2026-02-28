@@ -22,13 +22,18 @@ TIME_FORMATS = [
 
 # Combined datetime patterns (single column)
 DATETIME_FORMATS = [
-    ("%Y-%m-%d %H:%M", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}"),
-    ("%Y-%m-%dT%H:%M", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}"),
-    ("%d.%m.%Y %H:%M", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}"),
-    ("%d.%m.%Y:%H:%M", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{2}"),          # colon separator
+    # With seconds (check before without-seconds to avoid partial match)
+    ("%Y-%m-%d %H:%M:%S", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}:\d{2}"),
+    ("%Y-%m-%dT%H:%M:%S", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}:\d{2}"),
+    ("%d.%m.%Y %H:%M:%S", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}:\d{2}"),
     ("%d.%m.%Y:%H:%M:%S", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{2}:\d{2}"), # colon with seconds
-    ("%d.%m.%y %H:%M", r"\d{2}\.\d{2}\.\d{2}\s+\d{1,2}:\d{2}"),        # 2-digit year + time
-    ("%d.%m.%y:%H:%M", r"\d{2}\.\d{2}\.\d{2}:\d{1,2}:\d{2}"),          # 2-digit year + colon
+    # Without seconds
+    ("%Y-%m-%d %H:%M", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}$"),
+    ("%Y-%m-%dT%H:%M", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$"),
+    ("%d.%m.%Y %H:%M", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}$"),
+    ("%d.%m.%Y:%H:%M", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{2}$"),          # colon separator
+    ("%d.%m.%y %H:%M", r"\d{2}\.\d{2}\.\d{2}\s+\d{1,2}:\d{2}$"),        # 2-digit year + time
+    ("%d.%m.%y:%H:%M", r"\d{2}\.\d{2}\.\d{2}:\d{1,2}:\d{2}$"),          # 2-digit year + colon
 ]
 
 

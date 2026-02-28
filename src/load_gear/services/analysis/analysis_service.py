@@ -147,6 +147,13 @@ async def run_analysis(
             source_file_id=source_file_id,
         )
 
+        # Delete old v2 data for this meter (allows re-run)
+        old_v2 = await meter_read_repo.delete_by_meter_version(
+            session, meter_id, version=2
+        )
+        if old_v2 > 0:
+            logger.info("Deleted %d old v2 rows for meter %s before re-analysis", old_v2, meter_id)
+
         # Insert v2 rows
         if v2_rows:
             inserted = await meter_read_repo.bulk_insert(session, v2_rows)

@@ -417,3 +417,399 @@ def test_parse_error_has_context() -> None:
         detect_format(csv)
     assert exc_info.value.context
     assert "columns" in exc_info.value.context
+
+
+# --- Robustness: diverse input formats ---
+
+
+def test_pipe_delimited() -> None:
+    """Pipe-delimited CSV is parsed correctly."""
+    csv = (
+        b"Datum|Uhrzeit|Wert (kWh)\n"
+        b"01.01.2025|00:00|12,5\n"
+        b"01.01.2025|00:15|13,2\n"
+        b"01.01.2025|00:30|11,8\n"
+        b"01.01.2025|00:45|12,1\n"
+        b"01.01.2025|01:00|10,9\n"
+        b"01.01.2025|01:15|11,4\n"
+        b"01.01.2025|01:30|10,2\n"
+        b"01.01.2025|01:45|9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["delimiter"] == "|"
+    assert rules["decimal_separator"] == ","
+    assert "Datum" in rules["timestamp_columns"]
+
+
+def test_no_keyword_header_positional_fallback() -> None:
+    """When column names are meaningless, positional heuristic finds timestamp + value."""
+    csv = (
+        b"A;B;C\n"
+        b"01.01.2025;00:00;12,5\n"
+        b"01.01.2025;00:15;13,2\n"
+        b"01.01.2025;00:30;11,8\n"
+        b"01.01.2025;00:45;12,1\n"
+        b"01.01.2025;01:00;10,9\n"
+        b"01.01.2025;01:15;11,4\n"
+        b"01.01.2025;01:30;10,2\n"
+        b"01.01.2025;01:45;9,8\n"
+    )
+    rules = detect_format(csv)
+    # Positional heuristic: A=date, B=time (detected from sample data)
+    assert "A" in rules["timestamp_columns"]
+    assert "B" in rules["timestamp_columns"]
+    assert rules["value_column"] == "C"
+    assert rules["date_format"] == "%d.%m.%Y"
+    assert rules["time_format"] == "%H:%M"
+
+
+def test_iso_datetime_t_separator() -> None:
+    """ISO datetime with T separator (2025-01-01T00:15)."""
+    csv = (
+        b"timestamp,value_kwh\n"
+        b"2025-01-01T00:00,12.5\n"
+        b"2025-01-01T00:15,13.2\n"
+        b"2025-01-01T00:30,11.8\n"
+        b"2025-01-01T00:45,12.1\n"
+        b"2025-01-01T01:00,10.9\n"
+        b"2025-01-01T01:15,11.4\n"
+        b"2025-01-01T01:30,10.2\n"
+        b"2025-01-01T01:45,9.8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["date_format"] == "%Y-%m-%dT%H:%M"
+    assert rules["time_format"] == ""
+
+
+def test_bracket_unit_notation() -> None:
+    """Unit in square brackets: Wert [kWh]."""
+    csv = (
+        b"Datum;Uhrzeit;Wert [kWh]\n"
+        b"01.01.2025;00:00;12,5\n"
+        b"01.01.2025;00:15;13,2\n"
+        b"01.01.2025;00:30;11,8\n"
+        b"01.01.2025;00:45;12,1\n"
+        b"01.01.2025;01:00;10,9\n"
+        b"01.01.2025;01:15;11,4\n"
+        b"01.01.2025;01:30;10,2\n"
+        b"01.01.2025;01:45;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["value_column"] == "Wert [kWh]"
+    assert rules["unit"] == "kWh"
+
+
+def test_extra_columns_ignored() -> None:
+    """Extra columns (meter ID, status) don't break detection."""
+    csv = (
+        b"Zaehler;Datum;Uhrzeit;Wert (kWh);Status\n"
+        b"DE001;01.01.2025;00:00;12,5;OK\n"
+        b"DE001;01.01.2025;00:15;13,2;OK\n"
+        b"DE001;01.01.2025;00:30;11,8;OK\n"
+        b"DE001;01.01.2025;00:45;12,1;OK\n"
+        b"DE001;01.01.2025;01:00;10,9;OK\n"
+        b"DE001;01.01.2025;01:15;11,4;OK\n"
+        b"DE001;01.01.2025;01:30;10,2;OK\n"
+        b"DE001;01.01.2025;01:45;9,8;OK\n"
+    )
+    rules = detect_format(csv)
+    assert "Datum" in rules["timestamp_columns"]
+    assert rules["value_column"] == "Wert (kWh)"
+
+
+def test_negative_values_einspeisung() -> None:
+    """Negative values (feed-in / Einspeisung) are handled."""
+    csv = (
+        b"Datum;Uhrzeit;Einspeisung (kWh)\n"
+        b"01.01.2025;00:00;-12,5\n"
+        b"01.01.2025;00:15;-13,2\n"
+        b"01.01.2025;00:30;-11,8\n"
+        b"01.01.2025;00:45;-12,1\n"
+        b"01.01.2025;01:00;-10,9\n"
+        b"01.01.2025;01:15;-11,4\n"
+        b"01.01.2025;01:30;-10,2\n"
+        b"01.01.2025;01:45;-9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["value_column"] == "Einspeisung (kWh)"
+    assert rules["decimal_separator"] == ","
+
+
+def test_integer_only_values() -> None:
+    """Values without decimal point (integers) are detected."""
+    csv = (
+        b"Datum;Uhrzeit;Verbrauch\n"
+        b"01.01.2025;00:00;125\n"
+        b"01.01.2025;00:15;132\n"
+        b"01.01.2025;00:30;118\n"
+        b"01.01.2025;00:45;121\n"
+        b"01.01.2025;01:00;109\n"
+        b"01.01.2025;01:15;114\n"
+        b"01.01.2025;01:30;102\n"
+        b"01.01.2025;01:45;98\n"
+    )
+    rules = detect_format(csv)
+    assert rules["value_column"] == "Verbrauch"
+    assert rules["series_type"] == "interval"
+
+
+def test_english_column_names_consumption() -> None:
+    """English column names: 'consumption' detected as value column."""
+    columns = ["date", "time", "consumption"]
+    data_rows = [
+        ["2025-01-01", "00:00", "12.5"],
+        ["2025-01-01", "00:15", "13.2"],
+    ]
+    ts_cols, val_col, _, _ = _map_columns(columns, data_rows)
+    assert val_col == "consumption"
+    assert "date" in ts_cols
+
+
+def test_english_column_names_load() -> None:
+    """English column name: 'load' detected as value column."""
+    columns = ["date", "time", "load"]
+    data_rows = [
+        ["2025-01-01", "00:00", "50.3"],
+        ["2025-01-01", "00:15", "52.1"],
+    ]
+    ts_cols, val_col, _, _ = _map_columns(columns, data_rows)
+    assert val_col == "load"
+
+
+def test_english_column_names_generation() -> None:
+    """English column name: 'generation' detected as value column."""
+    columns = ["date", "time", "generation"]
+    data_rows = [
+        ["2025-01-01", "00:00", "50.3"],
+        ["2025-01-01", "00:15", "52.1"],
+    ]
+    ts_cols, val_col, _, _ = _map_columns(columns, data_rows)
+    assert val_col == "generation"
+
+
+def test_seconds_in_time_format() -> None:
+    """Time format with seconds: HH:MM:SS."""
+    csv = (
+        b"Datum;Uhrzeit;Wert (kWh)\n"
+        b"01.01.2025;00:00:00;12,5\n"
+        b"01.01.2025;00:15:00;13,2\n"
+        b"01.01.2025;00:30:00;11,8\n"
+        b"01.01.2025;00:45:00;12,1\n"
+        b"01.01.2025;01:00:00;10,9\n"
+        b"01.01.2025;01:15:00;11,4\n"
+        b"01.01.2025;01:30:00;10,2\n"
+        b"01.01.2025;01:45:00;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["time_format"] == "%H:%M:%S"
+
+
+def test_two_digit_year_combined_datetime() -> None:
+    """Combined datetime with 2-digit year: dd.mm.yy HH:MM."""
+    csv = (
+        b"Zeitstempel;Wert (kWh)\n"
+        b"01.01.25 00:00;12,5\n"
+        b"01.01.25 00:15;13,2\n"
+        b"01.01.25 00:30;11,8\n"
+        b"01.01.25 00:45;12,1\n"
+        b"01.01.25 01:00;10,9\n"
+        b"01.01.25 01:15;11,4\n"
+        b"01.01.25 01:30;10,2\n"
+        b"01.01.25 01:45;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["date_format"] == "%d.%m.%y %H:%M"
+    assert rules["time_format"] == ""
+
+
+def test_whitespace_padded_columns() -> None:
+    """Column names with leading/trailing whitespace are trimmed."""
+    csv = (
+        b" Datum ; Uhrzeit ; Wert (kWh) \n"
+        b"01.01.2025;00:00;12,5\n"
+        b"01.01.2025;00:15;13,2\n"
+        b"01.01.2025;00:30;11,8\n"
+        b"01.01.2025;00:45;12,1\n"
+        b"01.01.2025;01:00;10,9\n"
+        b"01.01.2025;01:15;11,4\n"
+        b"01.01.2025;01:30;10,2\n"
+        b"01.01.2025;01:45;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert "Datum" in rules["timestamp_columns"]
+    assert rules["value_column"] == "Wert (kWh)"
+
+
+def test_german_thousands_separator() -> None:
+    """German number format with thousands separator: 1.234,56."""
+    csv = (
+        b"Datum;Uhrzeit;Zaehlerstand (kWh)\n"
+        b"01.01.2025;00:00;1.234,56\n"
+        b"01.01.2025;00:15;1.247,89\n"
+        b"01.01.2025;00:30;1.260,12\n"
+        b"01.01.2025;00:45;1.273,45\n"
+        b"01.01.2025;01:00;1.286,78\n"
+        b"01.01.2025;01:15;1.300,11\n"
+        b"01.01.2025;01:30;1.313,44\n"
+        b"01.01.2025;01:45;1.326,77\n"
+    )
+    rules = detect_format(csv)
+    assert rules["decimal_separator"] == ","
+    assert rules["value_column"] == "Zaehlerstand (kWh)"
+
+
+def test_slash_date_format_eu() -> None:
+    """EU slash date format: DD/MM/YYYY."""
+    samples = ["01/01/2025", "02/01/2025", "03/01/2025"]
+    fmt = detect_date_format(samples)
+    assert fmt in ("%d/%m/%Y", "%m/%d/%Y")  # ambiguous without context
+
+
+def test_mwh_unit_detection() -> None:
+    """MWh unit in column name is detected."""
+    columns = ["Datum", "Uhrzeit", "Arbeit (MWh)"]
+    data_rows = [
+        ["01.01.2025", "00:00", "1,234"],
+        ["01.01.2025", "00:15", "1,256"],
+    ]
+    ts_cols, val_col, _, col_unit = _map_columns(columns, data_rows)
+    assert val_col == "Arbeit (MWh)"
+
+
+def test_quoted_csv_with_embedded_delimiter() -> None:
+    """Quoted CSV fields with embedded delimiter don't break parsing."""
+    csv = (
+        b'Datum;Uhrzeit;"Wert (kWh)"\n'
+        b'01.01.2025;00:00;12,5\n'
+        b'01.01.2025;00:15;13,2\n'
+        b'01.01.2025;00:30;11,8\n'
+        b'01.01.2025;00:45;12,1\n'
+        b'01.01.2025;01:00;10,9\n'
+        b'01.01.2025;01:15;11,4\n'
+        b'01.01.2025;01:30;10,2\n'
+        b'01.01.2025;01:45;9,8\n'
+    )
+    rules = detect_format(csv)
+    assert rules["value_column"] == "Wert (kWh)"
+
+
+def test_combined_datetime_with_seconds() -> None:
+    """Combined datetime with seconds: YYYY-MM-DD HH:MM:SS."""
+    csv = (
+        b"timestamp,value\n"
+        b"2025-01-01 00:00:00,12.5\n"
+        b"2025-01-01 00:15:00,13.2\n"
+        b"2025-01-01 00:30:00,11.8\n"
+        b"2025-01-01 00:45:00,12.1\n"
+        b"2025-01-01 01:00:00,10.9\n"
+        b"2025-01-01 01:15:00,11.4\n"
+        b"2025-01-01 01:30:00,10.2\n"
+        b"2025-01-01 01:45:00,9.8\n"
+    )
+    rules = detect_format(csv)
+    assert "timestamp" in rules["timestamp_columns"]
+    assert rules["time_format"] == ""
+
+
+def test_multiple_metadata_rows_with_empty_lines() -> None:
+    """Metadata preamble with empty lines between sections."""
+    csv = (
+        b"Energieversorger XY GmbH\n"
+        b"\n"
+        b"Lastgangdaten\n"
+        b"Exportiert am: 01.02.2025\n"
+        b"\n"
+        b"Datum;Uhrzeit;Verbrauch (kWh)\n"
+        b"01.01.2025;00:00;12,5\n"
+        b"01.01.2025;00:15;13,2\n"
+        b"01.01.2025;00:30;11,8\n"
+        b"01.01.2025;00:45;12,1\n"
+        b"01.01.2025;01:00;10,9\n"
+        b"01.01.2025;01:15;11,4\n"
+        b"01.01.2025;01:30;10,2\n"
+        b"01.01.2025;01:45;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert "Datum" in rules["timestamp_columns"]
+    assert rules["value_column"] == "Verbrauch (kWh)"
+
+
+def test_start_end_time_columns() -> None:
+    """CSV with Startzeit + Endzeit: only start time is kept, end time dropped."""
+    csv = (
+        b"Datum;Startzeit;Endzeit;Leistung (kW);Verbrauch (kWh)\n"
+        b"01.01.2024;00:00:00;00:15:00;8,22;2,055\n"
+        b"01.01.2024;00:15:00;00:30:00;8,424;2,106\n"
+        b"01.01.2024;00:30:00;00:45:00;7,95;1,988\n"
+        b"01.01.2024;00:45:00;01:00:00;8,11;2,028\n"
+        b"01.01.2024;01:00:00;01:15:00;7,88;1,970\n"
+        b"01.01.2024;01:15:00;01:30:00;8,05;2,013\n"
+        b"01.01.2024;01:30:00;01:45:00;7,72;1,930\n"
+        b"01.01.2024;01:45:00;02:00:00;7,99;1,998\n"
+    )
+    rules = detect_format(csv)
+    assert rules["timestamp_columns"] == ["Datum", "Startzeit"]
+    assert "Endzeit" not in rules["timestamp_columns"]
+    assert rules["date_format"] == "%d.%m.%Y"
+    assert rules["time_format"] == "%H:%M:%S"
+
+
+def test_start_end_time_von_bis() -> None:
+    """CSV with Von + Bis time columns: only Von (start) is kept."""
+    columns = ["Datum", "Von", "Bis", "Wert (kWh)"]
+    data_rows = [
+        ["01.01.2025", "00:00", "00:15", "12,5"],
+        ["01.01.2025", "00:15", "00:30", "13,2"],
+    ]
+    ts_cols, val_col, _, _ = _map_columns(columns, data_rows)
+    assert "Von" in ts_cols
+    assert "Bis" not in ts_cols
+    assert val_col == "Wert (kWh)"
+
+
+def test_metadata_preamble_with_separator_line() -> None:
+    """Metadata preamble with ;;;; separator line: header_row maps to raw line, not filtered index."""
+    csv = (
+        b"Energieversorger GmbH\n"
+        b"Lastgangdaten Export\n"
+        b"Zeitraum: 01.01.2024 - 31.12.2024\n"
+        b"Zaehlernummer: 12345\n"
+        b";;;;\n"
+        b"Datum;Startzeit;Endzeit;Leistung (kW);Verbrauch (kWh)\n"
+        b"01.01.2024;00:00:00;00:15:00;8,22;2,055\n"
+        b"01.01.2024;00:15:00;00:30:00;8,424;2,106\n"
+        b"01.01.2024;00:30:00;00:45:00;7,95;1,988\n"
+        b"01.01.2024;00:45:00;01:00:00;8,11;2,028\n"
+        b"01.01.2024;01:00:00;01:15:00;7,88;1,970\n"
+        b"01.01.2024;01:15:00;01:30:00;8,05;2,013\n"
+        b"01.01.2024;01:30:00;01:45:00;7,72;1,930\n"
+        b"01.01.2024;01:45:00;02:00:00;7,99;1,998\n"
+    )
+    rules = detect_format(csv)
+    # header_row must be raw line 5 (not filtered index 4)
+    assert rules["header_row"] == 5
+    assert rules["timestamp_columns"] == ["Datum", "Startzeit"]
+    assert "Endzeit" not in rules["timestamp_columns"]
+    assert rules["time_format"] == "%H:%M:%S"
+
+
+def test_map_columns_strom() -> None:
+    """German column name 'Strom' detected as value column."""
+    columns = ["Datum", "Uhrzeit", "Strom"]
+    data_rows = [
+        ["01.01.2025", "00:00", "50,3"],
+        ["01.01.2025", "00:15", "52,1"],
+    ]
+    ts_cols, val_col, _, _ = _map_columns(columns, data_rows)
+    assert val_col == "Strom"
+
+
+def test_map_columns_ertrag() -> None:
+    """German column name 'Ertrag' detected as value column."""
+    columns = ["Datum", "Uhrzeit", "Ertrag"]
+    data_rows = [
+        ["01.01.2025", "00:00", "50,3"],
+        ["01.01.2025", "00:15", "52,1"],
+    ]
+    ts_cols, val_col, _, _ = _map_columns(columns, data_rows)
+    assert val_col == "Ertrag"

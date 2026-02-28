@@ -375,7 +375,16 @@ button:disabled {
 
     try {
       const resp = await fetch('/api/v1/pipeline/run', { method: 'POST', body: form });
-      const data = await resp.json();
+      let data;
+      try {
+        data = await resp.json();
+      } catch (parseErr) {
+        const text = await resp.text().catch(() => '');
+        showError('Server-Fehler (HTTP ' + resp.status + '): ' + (text || 'Keine Antwort'));
+        $('btn_upload').disabled = false;
+        setStatus('');
+        return;
+      }
 
       if (!resp.ok) {
         showError(data.detail || JSON.stringify(data));

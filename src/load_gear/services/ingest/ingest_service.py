@@ -103,7 +103,20 @@ async def run_ingest(
             source_file_id=file_id,
         )
 
-        # 8. Bulk insert into meter_reads
+        # 8. Delete old v1 data for this meter (allows re-upload)
+        old_count = await meter_read_repo.delete_by_meter_version(
+            session, meter_id, version=1
+        )
+        if old_count > 0:
+            logger.info(
+                "Deleted %d old v1 rows for meter %s before re-ingest",
+                old_count, meter_id,
+            )
+            quality_stats.setdefault("warnings", []).append(
+                f"{old_count} old v1 rows replaced by new upload"
+            )
+
+        # 9. Bulk insert into meter_reads
         inserted = await meter_read_repo.bulk_insert(session, rows)
         quality_stats["inserted_rows"] = inserted
 
