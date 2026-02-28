@@ -65,3 +65,13 @@
 43. [x] Task-040 — Weather Admin Endpoints (4 endpoints on /api/v1/weather: import, stations, observations, delete)
 44. [x] Task-041 — PLZ Geocoding Service (909 centroids, 3-digit/2-digit prefix fallback, wired into analysis P4.2)
 45. [x] Task-042 — Phase 7 Tests + Integration Test (292 tests total)
+
+## Ingest Rework — XLS/XLSX Support + Variable Header Detection
+
+46. [x] IR-01 — Install clevercsv + xlrd dependencies
+47. [x] IR-02 — File-type detection (magic bytes) + Excel→rows conversion (openpyxl/xlrd)
+48. [x] IR-03 — New `_find_data_boundary()` header detection algorithm (skip metadata preambles)
+49. [x] IR-04 — Refactor `detect_format()` to work on uniform `list[list[str]]` rows
+50. [x] IR-05 — clevercsv fallback in delimiter detector
+51. [x] IR-06 — Normalizer XLS/XLSX reading path + `file_type` in rules dict
+52. [x] IR-07 — Test fixtures + 18 new tests (310 total)

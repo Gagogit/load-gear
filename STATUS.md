@@ -2,6 +2,27 @@
 
 Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 
+## Ingest Rework — XLS/XLSX Support + Variable Header Detection (DONE)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| IR-01 | Install clevercsv + xlrd dependencies | done |
+| IR-02 | File-type detection (magic bytes: XLSX/XLS/CSV) + Excel→rows conversion | done |
+| IR-03 | New `_find_data_boundary()` algorithm (skip metadata, find header) | done |
+| IR-04 | Refactor `detect_format()` to work on uniform `list[list[str]]` rows | done |
+| IR-05 | clevercsv fallback in delimiter detector | done |
+| IR-06 | Normalizer XLS/XLSX reading path (`_read_excel()`) | done |
+| IR-07 | Test fixtures + 18 new tests (310 total) | done |
+
+### Key Deliverables
+- **File type detection**: magic bytes (`PK\x03\x04`=XLSX, `\xd0\xcf\x11\xe0`=XLS, else CSV)
+- **Excel conversion**: openpyxl (XLSX) / xlrd (XLS) → uniform `list[list[str]]` rows
+- **Header detection rework**: `_find_data_boundary()` scans up to 50 rows for first data row (date+numeric), searches backwards for header using domain keywords (Datum, Wert, kWh, etc.)
+- **clevercsv**: fallback between csv.Sniffer and frequency analysis for messy CSV dialects
+- **Normalizer**: separate `_read_csv()` / `_read_excel()` paths, `file_type` in rules dict
+- **New fixture**: `german_with_header.csv` (5-line metadata preamble)
+- **310 tests** all passing
+
 ## Phase 7 — Weather Integration & Asset Intelligence (DONE)
 
 | Task | Description | Status |
