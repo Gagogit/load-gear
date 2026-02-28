@@ -99,6 +99,24 @@ def match_days(
     for year in years:
         all_holidays.update(_get_federal_holidays(year))
 
+    # Detect Störung days (daily total < 10% of avg weekday load)
+    daily_totals: dict = defaultdict(float)
+    daily_weekday: dict = {}
+    for r in v2_rows:
+        ts_local = r["ts_utc"].astimezone(_BERLIN)
+        d = ts_local.date()
+        daily_totals[d] += r["value"]
+        if d not in daily_weekday:
+            daily_weekday[d] = d.weekday() < 5 and d not in all_holidays
+
+    weekday_loads = [t for d, t in daily_totals.items() if daily_weekday.get(d)]
+    avg_weekday_load = sum(weekday_loads) / len(weekday_loads) if weekday_loads else 0.0
+    stoerung_dates: set = set()
+    if avg_weekday_load > 0:
+        for d, total in daily_totals.items():
+            if total < avg_weekday_load * 0.1:
+                stoerung_dates.add(d)
+
     # Classify historical data and group by (day_type, interval_index)
     # Skip Störung days from the matching pool
     type_interval_values: dict[str, dict[int, list[float]]] = defaultdict(
@@ -109,6 +127,11 @@ def match_days(
     for r in v2_rows:
         ts_local = r["ts_utc"].astimezone(_BERLIN)
         d = ts_local.date()
+
+        # Exclude Störung days entirely
+        if d in stoerung_dates:
+            continue
+
         day_type = _classify_date(d, all_holidays)
 
         # Compute interval index within the day
@@ -116,9 +139,7 @@ def match_days(
         interval_idx = minutes_in_day // interval_minutes
 
         val = r["value"]
-
-        if day_type != "Störung":
-            type_interval_values[day_type][interval_idx].append(val)
+        type_interval_values[day_type][interval_idx].append(val)
         global_interval_values[interval_idx].append(val)
 
     # Generate forecast timestamps
