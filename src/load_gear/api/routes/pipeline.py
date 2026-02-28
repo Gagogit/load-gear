@@ -114,15 +114,21 @@ async def pipeline_download(
     except FinancialError:
         pass
 
-    # Fallback to forecast series CSV
+    # Fallback to forecast series CSV (German format: semicolon + decimal comma)
     try:
         forecast_id, rows, total = await get_forecast_series(session, job_id, limit=100_000, offset=0)
-        lines = ["ts_utc,y_hat,q10,q50,q90"]
+
+        def _fmt(v: float | None) -> str:
+            if v is None:
+                return ""
+            return f"{v:.4f}".replace(".", ",")
+
+        lines = ["ts_utc;y_hat;q10;q50;q90"]
         for r in rows:
             lines.append(
-                f"{r.ts_utc.isoformat()},{r.y_hat},{r.q10 or ''},{r.q50 or ''},{r.q90 or ''}"
+                f"{r.ts_utc.isoformat()};{_fmt(r.y_hat)};{_fmt(r.q10)};{_fmt(r.q50)};{_fmt(r.q90)}"
             )
-        csv_content = "\n".join(lines).encode("utf-8")
+        csv_content = "\n".join(lines).encode("utf-8-sig")
         return Response(
             content=csv_content,
             media_type="text/csv",

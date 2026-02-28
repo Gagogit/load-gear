@@ -294,30 +294,44 @@ async def export_financial(
     return _export_csv(result, job_id)
 
 
-def _export_csv(result: dict, job_id: uuid.UUID) -> tuple[bytes, str, str]:
-    """Generate CSV export."""
-    import io
-    import csv
+def _fmt_de(v: float | int | None) -> str:
+    """Format a number with German decimal comma."""
+    if v is None:
+        return ""
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        s = f"{v:.6f}".rstrip("0").rstrip(".")
+        return s.replace(".", ",")
+    return str(v)
 
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
+
+def _export_csv(result: dict, job_id: uuid.UUID) -> tuple[bytes, str, str]:
+    """Generate CSV export (German format: semicolon delimiter, decimal comma)."""
+    import io
+
+    lines: list[str] = []
 
     # Header
-    writer.writerow(["ts_utc", "consumption_kwh", "price_mwh", "cost_eur"])
+    lines.append("ts_utc;consumption_kwh;price_mwh;cost_eur")
 
     for row in result["rows"]:
-        writer.writerow([row["ts_utc"], row["consumption_kwh"], row["price_mwh"], row["cost_eur"]])
+        lines.append(
+            f"{row['ts_utc']};{_fmt_de(row['consumption_kwh'])};{_fmt_de(row['price_mwh'])};{_fmt_de(row['cost_eur'])}"
+        )
 
     # Blank line + monthly summary
-    writer.writerow([])
-    writer.writerow(["Month", "Total Cost EUR", "Total kWh", "Avg Price EUR/MWh"])
+    lines.append("")
+    lines.append("Month;Total Cost EUR;Total kWh;Avg Price EUR/MWh")
     for ms in result["monthly_summary"]:
-        writer.writerow([ms["month"], ms["total_cost_eur"], ms["total_kwh"], ms["avg_price_mwh"]])
+        lines.append(
+            f"{ms['month']};{_fmt_de(ms['total_cost_eur'])};{_fmt_de(ms['total_kwh'])};{_fmt_de(ms['avg_price_mwh'])}"
+        )
 
-    writer.writerow([])
-    writer.writerow(["Total Cost EUR", result["total_cost_eur"]])
+    lines.append("")
+    lines.append(f"Total Cost EUR;{_fmt_de(result['total_cost_eur'])}")
 
-    content = output.getvalue().encode("utf-8-sig")
+    content = "\n".join(lines).encode("utf-8-sig")
     return content, "text/csv; charset=utf-8", f"financial_{job_id}.csv"
 
 
