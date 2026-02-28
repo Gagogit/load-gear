@@ -1,5 +1,6 @@
 """Unit tests for the normalization service (P2b)."""
 
+import io
 import uuid
 from pathlib import Path
 
@@ -182,3 +183,72 @@ def test_normalize_dst_fall_back() -> None:
     # 16 data rows should all parse
     assert stats["valid_rows"] == 16
     assert len(rows) == 16
+
+
+# --- XLSX normalization ---
+
+
+def _make_xlsx_bytes() -> bytes:
+    """Create a minimal XLSX file in memory for testing."""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Datum", "Uhrzeit", "Wert (kWh)"])
+    ws.append(["01.01.2025", "00:00", "12,5"])
+    ws.append(["01.01.2025", "00:15", "13,2"])
+    ws.append(["01.01.2025", "00:30", "11,8"])
+    ws.append(["01.01.2025", "00:45", "12,1"])
+    ws.append(["01.01.2025", "01:00", "10,9"])
+    ws.append(["01.01.2025", "01:15", "11,4"])
+    ws.append(["01.01.2025", "01:30", "10,2"])
+    ws.append(["01.01.2025", "01:45", "9,8"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_normalize_xlsx() -> None:
+    """XLSX file produces correct v1 rows."""
+    data = _make_xlsx_bytes()
+    job_id, file_id = _make_ids()
+
+    rules = {
+        **GERMAN_RULES,
+        "file_type": "xlsx",
+        "header_row": 0,
+    }
+
+    rows, stats = normalize(
+        data, rules, meter_id="XLSX_METER", job_id=job_id, source_file_id=file_id
+    )
+
+    assert len(rows) == 8
+    assert stats["valid_rows"] == 8
+    assert stats["invalid_rows"] == 0
+    assert rows[0]["value"] == 12.5
+    assert rows[0]["unit"] == "kWh"
+    assert rows[0]["meter_id"] == "XLSX_METER"
+
+
+# --- CSV with metadata header normalization ---
+
+
+def test_normalize_csv_with_metadata() -> None:
+    """CSV with metadata header normalizes correctly using header_row offset."""
+    data = (FIXTURES / "german_with_header.csv").read_bytes()
+    job_id, file_id = _make_ids()
+
+    rules = {
+        **GERMAN_RULES,
+        "header_row": 5,
+    }
+
+    rows, stats = normalize(
+        data, rules, meter_id="META_METER", job_id=job_id, source_file_id=file_id
+    )
+
+    assert len(rows) == 8
+    assert stats["valid_rows"] == 8
+    assert rows[0]["value"] == 12.5
+    assert rows[0]["meter_id"] == "META_METER"

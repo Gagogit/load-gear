@@ -1,10 +1,17 @@
 """Unit tests for format detection service (P2a)."""
 
+import io
 from pathlib import Path
 
 import pytest
 
-from load_gear.services.ingest.format_detector import detect_format, ParseError
+from load_gear.services.ingest.format_detector import (
+    detect_format,
+    detect_file_type,
+    ParseError,
+    _find_data_boundary,
+    _csv_to_rows,
+)
 from load_gear.services.ingest.detectors.encoding import detect_encoding
 from load_gear.services.ingest.detectors.delimiter import detect_delimiter
 from load_gear.services.ingest.detectors.datetime_format import (
@@ -137,6 +144,7 @@ def test_detect_german_format() -> None:
     assert "Datum" in rules["timestamp_columns"]
     assert "Uhrzeit" in rules["timestamp_columns"]
     assert rules["value_column"] == "Wert (kWh)"
+    assert rules["file_type"] == "csv"
 
 
 def test_detect_iso_format() -> None:
@@ -146,6 +154,7 @@ def test_detect_iso_format() -> None:
     assert rules["delimiter"] == ","
     assert "." in rules["decimal_separator"]
     assert rules["series_type"] == "interval"
+    assert rules["file_type"] == "csv"
 
 
 def test_detect_cumulative_format() -> None:
@@ -190,3 +199,104 @@ def test_detect_iso8859_encoding() -> None:
     rules = detect_format(data)
     assert rules["delimiter"] == ";"
     assert rules["decimal_separator"] == ","
+
+
+# --- File type detection ---
+
+
+def test_detect_file_type_csv() -> None:
+    assert detect_file_type(b"Datum;Wert\n01.01.2025;12,5\n") == "csv"
+
+
+def test_detect_file_type_xlsx() -> None:
+    assert detect_file_type(b"PK\x03\x04something") == "xlsx"
+
+
+def test_detect_file_type_xls() -> None:
+    assert detect_file_type(b"\xd0\xcf\x11\xe0something") == "xls"
+
+
+# --- Data boundary detection ---
+
+
+def test_find_data_boundary_simple() -> None:
+    """Simple CSV without metadata → header=0, data_start=1."""
+    rows = [
+        ["Datum", "Uhrzeit", "Wert (kWh)"],
+        ["01.01.2025", "00:00", "12,5"],
+        ["01.01.2025", "00:15", "13,2"],
+    ]
+    header, data_start = _find_data_boundary(rows)
+    assert header == 0
+    assert data_start == 1
+
+
+def test_find_data_boundary_with_metadata() -> None:
+    """CSV with 5 metadata lines → header found at correct row."""
+    rows = [
+        ["Stadtwerke Musterstadt GmbH", "", ""],
+        ["Lastgangdaten Export", "", ""],
+        ["Zeitraum: 01.01.2025 - 31.01.2025", "", ""],
+        ["Zählernummer: 1ESY1234567890", "", ""],
+        ["---", "", ""],
+        ["Datum", "Uhrzeit", "Wert (kWh)"],
+        ["01.01.2025", "00:00", "12,5"],
+        ["01.01.2025", "00:15", "13,2"],
+    ]
+    header, data_start = _find_data_boundary(rows)
+    assert header == 5
+    assert data_start == 6
+
+
+# --- CSV with metadata header (integration) ---
+
+
+def test_detect_csv_with_metadata_header() -> None:
+    """CSV with 5 metadata lines before actual data header → correct header_row."""
+    data = (FIXTURES / "german_with_header.csv").read_bytes()
+    rules = detect_format(data)
+    assert rules["header_row"] == 5
+    assert rules["delimiter"] == ";"
+    assert "Datum" in rules["timestamp_columns"]
+    assert "Uhrzeit" in rules["timestamp_columns"]
+    assert rules["value_column"] == "Wert (kWh)"
+    assert rules["decimal_separator"] == ","
+    assert rules["date_format"] == "%d.%m.%Y"
+    assert rules["time_format"] == "%H:%M"
+
+
+# --- XLSX detection (integration) ---
+
+
+def _make_xlsx_bytes() -> bytes:
+    """Create a minimal XLSX file in memory for testing."""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Datum", "Uhrzeit", "Wert (kWh)"])
+    ws.append(["01.01.2025", "00:00", "12,5"])
+    ws.append(["01.01.2025", "00:15", "13,2"])
+    ws.append(["01.01.2025", "00:30", "11,8"])
+    ws.append(["01.01.2025", "00:45", "12,1"])
+    ws.append(["01.01.2025", "01:00", "10,9"])
+    ws.append(["01.01.2025", "01:15", "11,4"])
+    ws.append(["01.01.2025", "01:30", "10,2"])
+    ws.append(["01.01.2025", "01:45", "9,8"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_detect_xlsx_format() -> None:
+    """XLSX file → correct rules extracted."""
+    data = _make_xlsx_bytes()
+    rules = detect_format(data)
+    assert rules["file_type"] == "xlsx"
+    assert "Datum" in rules["timestamp_columns"]
+    assert "Uhrzeit" in rules["timestamp_columns"]
+    assert rules["value_column"] == "Wert (kWh)"
+    assert rules["date_format"] == "%d.%m.%Y"
+    assert rules["time_format"] == "%H:%M"
+    assert rules["decimal_separator"] == ","
+    assert rules["unit"] == "kWh"

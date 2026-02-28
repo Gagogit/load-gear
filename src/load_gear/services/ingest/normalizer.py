@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 import polars as pl
 
+from load_gear.services.ingest.format_detector import detect_file_type
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,8 +34,6 @@ def normalize(
       rows: list of dicts ready for bulk_insert
       quality_stats: {total_rows, valid_rows, invalid_rows, warnings}
     """
-    encoding = rules["encoding"]
-    delimiter = rules["delimiter"]
     header_row = rules.get("header_row", 0)
     timestamp_columns = rules["timestamp_columns"]
     value_column = rules["value_column"]
@@ -44,35 +44,14 @@ def normalize(
     series_type = rules["series_type"]
     tz_name = rules.get("timezone", "Europe/Berlin")
 
-    # Decode
-    try:
-        text = raw_bytes.decode(encoding)
-    except (UnicodeDecodeError, LookupError) as exc:
-        raise NormalizationError(f"Cannot decode file with encoding {encoding}: {exc}") from exc
+    file_type = rules.get("file_type", detect_file_type(raw_bytes))
 
-    if text.startswith("\ufeff"):
-        text = text[1:]
+    if file_type in ("xlsx", "xls"):
+        df = _read_excel(raw_bytes, file_type, header_row)
+    else:
+        df = _read_csv(raw_bytes, rules)
 
-    # Skip lines before header
-    lines = text.split("\n")
-    if header_row > 0:
-        text = "\n".join(lines[header_row:])
-
-    # Read with Polars
-    try:
-        lf = pl.read_csv(
-            io.StringIO(text),
-            separator=delimiter,
-            has_header=True,
-            infer_schema_length=0,  # read everything as string first
-        ).lazy()
-    except Exception as exc:
-        raise NormalizationError(f"Polars CSV parsing failed: {exc}") from exc
-
-    # Collect column names
-    df = lf.collect()
     total_rows = len(df)
-
     if total_rows == 0:
         raise NormalizationError("File contains no data rows")
 
@@ -121,9 +100,6 @@ def normalize(
         warnings.append("Converted MWh to kWh")
 
     # Build output rows
-    job_id_str = str(job_id)
-    file_id_str = str(source_file_id)
-
     rows: list[dict] = []
     for row in df.iter_rows(named=True):
         rows.append({
@@ -145,6 +121,76 @@ def normalize(
     }
 
     return rows, quality_stats
+
+
+def _read_csv(raw_bytes: bytes, rules: dict) -> pl.DataFrame:
+    """Read CSV bytes into a Polars DataFrame."""
+    encoding = rules["encoding"]
+    delimiter = rules["delimiter"]
+    header_row = rules.get("header_row", 0)
+
+    try:
+        text = raw_bytes.decode(encoding)
+    except (UnicodeDecodeError, LookupError) as exc:
+        raise NormalizationError(f"Cannot decode file with encoding {encoding}: {exc}") from exc
+
+    if text.startswith("\ufeff"):
+        text = text[1:]
+
+    lines = text.split("\n")
+    if header_row > 0:
+        text = "\n".join(lines[header_row:])
+
+    try:
+        return pl.read_csv(
+            io.StringIO(text),
+            separator=delimiter,
+            has_header=True,
+            infer_schema_length=0,
+        )
+    except Exception as exc:
+        raise NormalizationError(f"Polars CSV parsing failed: {exc}") from exc
+
+
+def _read_excel(raw_bytes: bytes, file_type: str, header_row: int) -> pl.DataFrame:
+    """Read XLS/XLSX bytes into a Polars DataFrame (all columns as strings)."""
+    if file_type == "xlsx":
+        import openpyxl
+
+        wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
+        ws = wb.active
+        all_rows: list[list[str]] = []
+        for row in ws.iter_rows():
+            all_rows.append(
+                [str(cell.value) if cell.value is not None else "" for cell in row]
+            )
+        wb.close()
+    else:
+        import xlrd
+
+        wb = xlrd.open_workbook(file_contents=raw_bytes)
+        ws = wb.sheet_by_index(0)
+        all_rows = []
+        for rx in range(ws.nrows):
+            all_rows.append([str(ws.cell_value(rx, cx)) for cx in range(ws.ncols)])
+
+    if len(all_rows) <= header_row:
+        raise NormalizationError("Excel file has fewer rows than expected header_row")
+
+    columns = [c.strip() for c in all_rows[header_row]]
+    data_rows = all_rows[header_row + 1:]
+
+    if not data_rows:
+        raise NormalizationError("File contains no data rows")
+
+    # Build DataFrame from rows
+    data_dict: dict[str, list[str]] = {col: [] for col in columns}
+    for row in data_rows:
+        for i, col in enumerate(columns):
+            val = row[i] if i < len(row) else ""
+            data_dict[col].append(val)
+
+    return pl.DataFrame(data_dict)
 
 
 def _build_timestamps(
@@ -195,7 +241,6 @@ def _build_timestamps(
         if ts_local is None:
             ts_utc_values.append(None)
             continue
-        # Make timezone-aware, then convert to UTC
         try:
             local_dt = ts_local.replace(tzinfo=tz)
             utc_dt = local_dt.astimezone(timezone.utc)

@@ -1,4 +1,8 @@
-"""Format detection orchestrator (P2a): auto-detect file format and produce a reader profile."""
+"""Format detection orchestrator (P2a): auto-detect file format and produce a reader profile.
+
+Supports CSV, XLSX, and XLS files. For Excel files, cells are converted to
+a uniform list[list[str]] before applying the same detection logic as CSV.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ import csv
 import io
 import logging
 import re
+from typing import Literal
 
 from load_gear.services.ingest.detectors.encoding import detect_encoding
 from load_gear.services.ingest.detectors.delimiter import detect_delimiter
@@ -19,89 +24,212 @@ from load_gear.services.ingest.detectors.series_type import detect_series_type
 
 logger = logging.getLogger(__name__)
 
+# Magic byte signatures
+_XLSX_MAGIC = b"PK\x03\x04"
+_XLS_MAGIC = b"\xd0\xcf\x11\xe0"
+
+# Keywords that indicate a header row (German + English energy domain)
+_HEADER_KEYWORDS = {
+    "datum", "uhrzeit", "wert", "date", "time", "value",
+    "leistung", "verbrauch", "kwh", "kw", "mwh", "wh",
+    "timestamp", "datetime", "zeitstempel", "zeit",
+    "zaehlerstand", "power", "energy", "periode",
+    "zählerstand", "einheit", "unit", "kanal", "channel",
+}
+
 
 class ParseError(Exception):
     """Raised when file format cannot be determined."""
     pass
 
 
+FileType = Literal["csv", "xlsx", "xls"]
+
+
+def detect_file_type(raw_bytes: bytes) -> FileType:
+    """Detect file type from magic bytes."""
+    if raw_bytes[:4] == _XLSX_MAGIC:
+        return "xlsx"
+    if raw_bytes[:4] == _XLS_MAGIC:
+        return "xls"
+    return "csv"
+
+
+def _xlsx_to_rows(raw_bytes: bytes) -> list[list[str]]:
+    """Read XLSX bytes into list of string rows."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
+    ws = wb.active
+    rows: list[list[str]] = []
+    for row in ws.iter_rows():
+        str_row = [str(cell.value) if cell.value is not None else "" for cell in row]
+        if any(c.strip() for c in str_row):
+            rows.append(str_row)
+    wb.close()
+    return rows
+
+
+def _xls_to_rows(raw_bytes: bytes) -> list[list[str]]:
+    """Read XLS bytes into list of string rows."""
+    import xlrd
+
+    wb = xlrd.open_workbook(file_contents=raw_bytes)
+    ws = wb.sheet_by_index(0)
+    rows: list[list[str]] = []
+    for rx in range(ws.nrows):
+        str_row = [str(ws.cell_value(rx, cx)) for cx in range(ws.ncols)]
+        if any(c.strip() for c in str_row):
+            rows.append(str_row)
+    return rows
+
+
+def _csv_to_rows(text: str, delimiter: str) -> list[list[str]]:
+    """Parse CSV text into list of string rows."""
+    rows: list[list[str]] = []
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    for row in reader:
+        if any(c.strip() for c in row):
+            rows.append(row)
+    return rows
+
+
+def _find_data_boundary(rows: list[list[str]]) -> tuple[int, int]:
+    """Find the header row and data start row.
+
+    Algorithm:
+    1. Scan rows (up to 50) for the first row that looks like data:
+       has a date-like cell AND a numeric cell.
+    2. Search backwards from there for a header row (contains known keywords
+       or >50% short non-numeric non-empty text cells).
+    3. Return (header_row_idx, data_start_idx).
+    """
+    limit = min(len(rows), 50)
+    data_start = -1
+
+    for i in range(limit):
+        row = rows[i]
+        has_date = any(_looks_like_date(c) or _looks_like_datetime(c) for c in row)
+        has_numeric = any(_is_numeric(c.strip()) for c in row if c.strip())
+        if has_date and has_numeric:
+            data_start = i
+            break
+
+    if data_start == -1:
+        # No clear data row found — fall back to first row with mostly non-numeric
+        return 0, 1
+
+    # Search backwards for header row
+    for i in range(data_start - 1, -1, -1):
+        row = rows[i]
+        non_empty = [c.strip() for c in row if c.strip()]
+        if not non_empty:
+            continue
+        # Check for known header keywords
+        lower_cells = {c.lower() for c in non_empty}
+        # Also check cleaned versions (strip units like "(kWh)")
+        cleaned = set()
+        for c in lower_cells:
+            cleaned.add(re.sub(r"\s*\(.*\)", "", c).strip())
+        if cleaned & _HEADER_KEYWORDS:
+            return i, data_start
+        # Check if >50% are short non-numeric text (likely labels)
+        short_text = sum(1 for c in non_empty if not _is_numeric(c) and len(c) < 40)
+        if short_text > len(non_empty) * 0.5:
+            return i, data_start
+
+    # No header found above data — use the row just before data if it exists
+    if data_start > 0:
+        return data_start - 1, data_start
+    return 0, 1 if len(rows) > 1 else 0
+
+
 def detect_format(raw_bytes: bytes) -> dict:
     """Detect file format from raw bytes and return a rules dict.
 
+    Supports CSV, XLSX, and XLS files.
+
     Returns a dict matching ReaderProfileRules fields:
-      encoding, delimiter, header_row, timestamp_columns, value_column,
+      file_type, encoding, delimiter, header_row, timestamp_columns, value_column,
       date_format, time_format, decimal_separator, unit, series_type, timezone
     """
-    # 1. Encoding detection
-    encoding = detect_encoding(raw_bytes)
-    try:
-        text = raw_bytes.decode(encoding)
-    except (UnicodeDecodeError, LookupError):
-        # Fallback
+    file_type = detect_file_type(raw_bytes)
+
+    if file_type == "xlsx":
+        rows = _xlsx_to_rows(raw_bytes)
+        encoding = "utf-8"
+        delimiter = ";"  # dummy for Excel
+    elif file_type == "xls":
+        rows = _xls_to_rows(raw_bytes)
+        encoding = "utf-8"
+        delimiter = ";"  # dummy for Excel
+    else:
+        # CSV path
+        encoding = detect_encoding(raw_bytes)
         try:
-            text = raw_bytes.decode("utf-8", errors="replace")
-            encoding = "utf-8"
-        except Exception as exc:
-            raise ParseError(f"Cannot decode file with any supported encoding") from exc
+            text = raw_bytes.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            try:
+                text = raw_bytes.decode("utf-8", errors="replace")
+                encoding = "utf-8"
+            except Exception as exc:
+                raise ParseError("Cannot decode file with any supported encoding") from exc
 
-    # Strip BOM if present
-    if text.startswith("\ufeff"):
-        text = text[1:]
+        if text.startswith("\ufeff"):
+            text = text[1:]
 
-    lines = [l for l in text.strip().split("\n") if l.strip()]
-    if len(lines) < 2:
-        raise ParseError("File has fewer than 2 lines (need header + at least 1 data row)")
+        delimiter = detect_delimiter(text)
+        rows = _csv_to_rows(text, delimiter)
 
-    # 2. Delimiter detection
-    delimiter = detect_delimiter(text)
+    if len(rows) < 2:
+        raise ParseError("File has fewer than 2 rows (need header + at least 1 data row)")
 
-    # 3. Header row detection — first row with mostly non-numeric content
-    header_row = _detect_header_row(lines, delimiter)
-    header_line = lines[header_row]
-    columns = _split_line(header_line, delimiter)
+    # Find header and data boundary
+    header_row, data_start = _find_data_boundary(rows)
+    columns = [c.strip() for c in rows[header_row]]
+    data_rows = rows[data_start:]
 
-    data_lines = lines[header_row + 1:]
-    if not data_lines:
+    if not data_rows:
         raise ParseError("No data rows found after header")
 
-    # 4. Column mapping: find timestamp and value columns
-    timestamp_cols, value_col, is_combined_ts = _map_columns(columns, data_lines, delimiter)
+    # Column mapping
+    timestamp_cols, value_col, is_combined_ts = _map_columns(columns, data_rows)
 
-    # 5. Date/time format detection
+    # Date/time format detection
     if is_combined_ts:
-        ts_samples = _get_column_samples(data_lines, delimiter, columns.index(timestamp_cols[0]))
+        ts_idx = columns.index(timestamp_cols[0])
+        ts_samples = _get_column_samples_from_rows(data_rows, ts_idx)
         dt_format, _ = detect_datetime_format(ts_samples)
         date_format = dt_format
         time_format = ""
     else:
-        date_samples = _get_column_samples(
-            data_lines, delimiter, columns.index(timestamp_cols[0])
-        )
+        date_idx = columns.index(timestamp_cols[0])
+        date_samples = _get_column_samples_from_rows(data_rows, date_idx)
         date_format = detect_date_format(date_samples)
 
         if len(timestamp_cols) > 1:
-            time_samples = _get_column_samples(
-                data_lines, delimiter, columns.index(timestamp_cols[1])
-            )
+            time_idx = columns.index(timestamp_cols[1])
+            time_samples = _get_column_samples_from_rows(data_rows, time_idx)
             time_format = detect_time_format(time_samples)
         else:
             time_format = ""
 
-    # 6. Value column analysis
+    # Value analysis
     value_idx = columns.index(value_col)
-    value_samples = _get_column_samples(data_lines, delimiter, value_idx)
+    value_samples = _get_column_samples_from_rows(data_rows, value_idx)
 
-    # 7. Decimal separator
     decimal_separator = detect_decimal_separator(value_samples)
 
-    # 8. Unit detection from header
-    unit = detect_unit(header_line)
+    # Unit detection from header row text
+    header_text = " ".join(columns)
+    unit = detect_unit(header_text)
 
-    # 9. Series type (cumulative vs interval)
+    # Series type
     parsed_values = _parse_values(value_samples, decimal_separator)
     series_type = detect_series_type(parsed_values)
 
     return {
+        "file_type": file_type,
         "encoding": encoding,
         "delimiter": delimiter,
         "header_row": header_row,
@@ -116,14 +244,80 @@ def detect_format(raw_bytes: bytes) -> dict:
     }
 
 
-def _detect_header_row(lines: list[str], delimiter: str) -> int:
-    """Find the header row index. Heuristic: first row where most cells are non-numeric."""
-    for i, line in enumerate(lines[:5]):
-        cells = _split_line(line, delimiter)
-        non_numeric = sum(1 for c in cells if not _is_numeric(c.strip()))
-        if non_numeric > len(cells) * 0.5:
-            return i
-    return 0
+# ---------- Internal helpers ----------
+
+
+def _get_column_samples_from_rows(data_rows: list[list[str]], col_idx: int) -> list[str]:
+    """Extract sample values from a specific column index in parsed rows."""
+    samples: list[str] = []
+    for row in data_rows[:20]:
+        if col_idx < len(row):
+            samples.append(row[col_idx])
+    return samples
+
+
+def _map_columns(
+    columns: list[str], data_rows: list[list[str]]
+) -> tuple[list[str], str, bool]:
+    """Map columns to timestamp and value roles.
+
+    Returns (timestamp_columns, value_column, is_combined_timestamp).
+    """
+    col_lower = [c.lower().strip() for c in columns]
+
+    ts_names = {"datum", "date", "timestamp", "zeit", "time", "datetime", "zeitstempel", "uhrzeit"}
+    value_names = {"wert", "value", "verbrauch", "leistung", "zaehlerstand", "power", "energy"}
+
+    timestamp_cols: list[str] = []
+    value_col: str | None = None
+    is_combined = False
+
+    for i, name in enumerate(col_lower):
+        clean = re.sub(r"\s*\(.*\)", "", name).strip()
+        if clean in ts_names:
+            timestamp_cols.append(columns[i])
+        elif any(vn in clean for vn in value_names):
+            value_col = columns[i]
+
+    if len(timestamp_cols) == 1 and timestamp_cols[0].lower().strip() in (
+        "timestamp", "datetime", "zeitstempel"
+    ):
+        is_combined = True
+    elif len(timestamp_cols) == 1:
+        sample = _get_column_samples_from_rows(
+            data_rows, col_lower.index(timestamp_cols[0].lower().strip())
+        )
+        if sample and " " in sample[0].strip():
+            is_combined = True
+
+    # Fallback: positional heuristics
+    if not timestamp_cols:
+        if len(columns) >= 2:
+            first_samples = _get_column_samples_from_rows(data_rows, 0)
+            if first_samples and _looks_like_datetime(first_samples[0]):
+                timestamp_cols = [columns[0]]
+                is_combined = True
+            elif first_samples and _looks_like_date(first_samples[0]):
+                timestamp_cols = [columns[0]]
+                if len(columns) >= 3:
+                    second_samples = _get_column_samples_from_rows(data_rows, 1)
+                    if second_samples and _looks_like_time(second_samples[0]):
+                        timestamp_cols.append(columns[1])
+
+    if not value_col:
+        for i in range(len(columns) - 1, -1, -1):
+            if columns[i] not in timestamp_cols:
+                samples = _get_column_samples_from_rows(data_rows, i)
+                if samples and _is_numeric(samples[0].strip()):
+                    value_col = columns[i]
+                    break
+
+    if not timestamp_cols:
+        raise ParseError("Cannot identify timestamp column(s)")
+    if not value_col:
+        raise ParseError("Cannot identify value column")
+
+    return timestamp_cols, value_col, is_combined
 
 
 def _split_line(line: str, delimiter: str) -> list[str]:
@@ -138,84 +332,6 @@ def _is_numeric(s: str) -> bool:
     """Check if a string looks numeric (with either comma or dot decimal)."""
     s = s.strip()
     return bool(re.match(r"^-?\d+([.,]\d+)?$", s))
-
-
-def _map_columns(
-    columns: list[str], data_lines: list[str], delimiter: str
-) -> tuple[list[str], str, bool]:
-    """Map columns to timestamp and value roles.
-
-    Returns (timestamp_columns, value_column, is_combined_timestamp).
-    """
-    col_lower = [c.lower().strip() for c in columns]
-
-    # Known timestamp column names
-    ts_names = {"datum", "date", "timestamp", "zeit", "time", "datetime", "zeitstempel", "uhrzeit"}
-    value_names = {"wert", "value", "verbrauch", "leistung", "zaehlerstand", "power", "energy"}
-
-    timestamp_cols: list[str] = []
-    value_col: str | None = None
-    is_combined = False
-
-    # Try to find named columns
-    for i, name in enumerate(col_lower):
-        clean = re.sub(r"\s*\(.*\)", "", name).strip()
-        if clean in ts_names:
-            timestamp_cols.append(columns[i].strip())
-        elif any(vn in clean for vn in value_names):
-            value_col = columns[i].strip()
-
-    # If we found a combined datetime column
-    if len(timestamp_cols) == 1 and timestamp_cols[0].lower().strip() in (
-        "timestamp", "datetime", "zeitstempel"
-    ):
-        is_combined = True
-    elif len(timestamp_cols) == 1:
-        # Check if the single column contains both date and time
-        sample = _get_column_samples(data_lines, delimiter, col_lower.index(timestamp_cols[0].lower().strip()))
-        if sample and " " in sample[0].strip():
-            is_combined = True
-
-    # Fallback: if no named columns found, use positional heuristics
-    if not timestamp_cols:
-        # First column(s) are usually timestamps
-        if len(columns) >= 2:
-            first_samples = _get_column_samples(data_lines, delimiter, 0)
-            if first_samples and _looks_like_datetime(first_samples[0]):
-                timestamp_cols = [columns[0].strip()]
-                is_combined = True
-            elif first_samples and _looks_like_date(first_samples[0]):
-                timestamp_cols = [columns[0].strip()]
-                if len(columns) >= 3:
-                    second_samples = _get_column_samples(data_lines, delimiter, 1)
-                    if second_samples and _looks_like_time(second_samples[0]):
-                        timestamp_cols.append(columns[1].strip())
-
-    if not value_col:
-        # Take the last numeric column
-        for i in range(len(columns) - 1, -1, -1):
-            if columns[i].strip() not in timestamp_cols:
-                samples = _get_column_samples(data_lines, delimiter, i)
-                if samples and _is_numeric(samples[0].strip()):
-                    value_col = columns[i].strip()
-                    break
-
-    if not timestamp_cols:
-        raise ParseError("Cannot identify timestamp column(s)")
-    if not value_col:
-        raise ParseError("Cannot identify value column")
-
-    return timestamp_cols, value_col, is_combined
-
-
-def _get_column_samples(data_lines: list[str], delimiter: str, col_idx: int) -> list[str]:
-    """Extract sample values from a specific column index."""
-    samples: list[str] = []
-    for line in data_lines[:20]:
-        cells = _split_line(line, delimiter)
-        if col_idx < len(cells):
-            samples.append(cells[col_idx])
-    return samples
 
 
 def _looks_like_date(s: str) -> bool:
@@ -236,6 +352,16 @@ def _looks_like_datetime(s: str) -> bool:
     return bool(re.match(
         r"(\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4})[T ]\d{1,2}:\d{2}", s
     ))
+
+
+def _get_column_samples(data_lines: list[str], delimiter: str, col_idx: int) -> list[str]:
+    """Extract sample values from a specific column index (legacy CSV line-based)."""
+    samples: list[str] = []
+    for line in data_lines[:20]:
+        cells = _split_line(line, delimiter)
+        if col_idx < len(cells):
+            samples.append(cells[col_idx])
+    return samples
 
 
 def _parse_values(samples: list[str], decimal_separator: str) -> list[float]:
