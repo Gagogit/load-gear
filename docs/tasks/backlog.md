@@ -84,3 +84,12 @@
 56. [x] CD-04 — Error context propagation through IngestError → pipeline response
 57. [x] CD-05 — Frontend error detail display (.error-detail box, XSS-safe)
 58. [x] CD-06 — Tests (12 new → 321 total)
+
+## Day-Type Matching Forecast
+
+59. [x] DM-01 — Extend day_classifier: `_is_non_workday` helper + Werktag-nach-Frei / Werktag-vor-Frei types
+60. [x] DM-02 — Create `day_matcher.py` (day-type interval averaging, percentage scaling, fallback chain)
+61. [x] DM-03 — Add `growth_pct` (Prozentwert) through frontend → route → pipeline_service → forecast_service
+62. [x] DM-04 — Rewire forecast_service: replace Prophet with day_matcher, model_alias "day_match"
+63. [x] DM-05 — Update calendar_mapping similarity map + `_classify_date` with new day types
+64. [x] DM-06 — Tests: 3 day_classifier + 5 day_matcher + existing test updates (353 total)

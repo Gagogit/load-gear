@@ -2,6 +2,26 @@
 
 Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 
+## Day-Type Matching Forecast (DONE)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| DM-01 | Extend day_classifier with 2 new types + `_is_non_workday` helper | done |
+| DM-02 | Create `day_matcher.py` (day-type interval averaging + percentage scaling) | done |
+| DM-03 | Add `growth_pct` form field + route param + pipeline threading | done |
+| DM-04 | Rewire forecast_service: Prophet → day_matcher, model_alias → "day_match" | done |
+| DM-05 | Update calendar_mapping similarity map with new types | done |
+| DM-06 | Tests (8 new → 353 total) | done |
+
+### Key Deliverables
+- **2 new day types**: Werktag-nach-Frei (workday after free day), Werktag-vor-Frei (workday before free day) — total 9 types
+- **Day matcher**: groups historical v2 by (day_type, interval_index), averages matching intervals, scales by user percentage
+- **Fallback chain**: exact type → similar type → global average → 0.0; Störung days excluded from pool
+- **Prozentwert**: frontend input (0–500%), threaded through route → pipeline → forecast as `growth_pct`
+- **Prophet dormant**: `prophet_trainer.py` kept untouched, import removed from forecast_service
+- **Deterministic output**: q10 = q50 = q90 = y_hat (no uncertainty bands)
+- **353 tests** all passing
+
 ## Robust Column Detection + Parse Error Context (DONE)
 
 | Task | Description | Status |
