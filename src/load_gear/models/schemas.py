@@ -11,9 +11,11 @@ from pydantic import BaseModel, Field
 class JobCreateRequest(BaseModel):
     """POST /api/v1/jobs request body."""
 
+    project_name: str = Field("", max_length=200, description="Project name")
     meter_id: str = Field(..., max_length=100, description="MaLo/Zählpunkt identifier")
     company_id: str | None = Field(None, max_length=100, description="Company identifier")
     plz: str | None = Field(None, max_length=5, description="Postal code for geo-matching")
+    user_id: str = Field("", max_length=100, description="User identifier")
     tasks: list[str] = Field(
         default_factory=lambda: ["Statistik"],
         description="Processing tasks: Statistik, Fehleranalyse, Imputation, Prognose, Aggregation",
@@ -29,9 +31,11 @@ class JobResponse(BaseModel):
 
     id: uuid.UUID
     status: str
+    project_name: str = ""
     company_id: str | None = None
     meter_id: str | None = None
     plz: str | None = None
+    user_id: str = ""
     current_phase: str | None = None
     error_message: str | None = None
     created_at: datetime
@@ -543,3 +547,15 @@ class WeatherObservationListResponse(BaseModel):
     station_id: str
     items: list[WeatherObservationRow]
     total: int
+
+
+# --- Pipeline schemas (P8) ---
+
+
+class PipelineStatusResponse(BaseModel):
+    """GET /api/v1/pipeline/{job_id}/status — 10 LED states."""
+
+    job_id: uuid.UUID
+    status: str
+    error_message: str | None = None
+    leds: dict[str, bool]

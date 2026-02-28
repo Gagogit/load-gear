@@ -55,9 +55,11 @@ class Job(Base):
         default=JobStatus.PENDING,
         nullable=False,
     )
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
     company_id: Mapped[str | None] = mapped_column(String(100))
     meter_id: Mapped[str | None] = mapped_column(String(100))
     plz: Mapped[str | None] = mapped_column(String(5))
+    user_id: Mapped[str] = mapped_column(String(100), nullable=False, server_default="")
     payload: Mapped[dict | None] = mapped_column(JSONB)
     current_phase: Mapped[str | None] = mapped_column(String(20))
     error_message: Mapped[str | None] = mapped_column(Text)

@@ -55,9 +55,11 @@ async def create_job(session: AsyncSession, request: JobCreateRequest) -> Job:
     job = Job(
         id=uuid.uuid4(),
         status=JobStatus.PENDING,
+        project_name=request.project_name,
         company_id=request.company_id,
         meter_id=request.meter_id,
         plz=request.plz,
+        user_id=request.user_id,
         payload=payload,
     )
     return await job_repo.create_job(session, job)

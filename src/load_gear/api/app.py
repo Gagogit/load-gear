@@ -9,7 +9,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from load_gear.core.database import dispose_engine
-from load_gear.api.routes import admin, analysis, files, financial, forecasts, hpfc, ingest, jobs, qa, weather
+from pathlib import Path
+
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from load_gear.api.routes import admin, analysis, files, financial, forecasts, hpfc, ingest, jobs, pipeline, qa, weather
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,16 @@ def create_app() -> FastAPI:
     app.include_router(hpfc.router)
     app.include_router(financial.router)
     app.include_router(weather.router)
+    app.include_router(pipeline.router)
+
+    # Serve frontend SPA
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    if static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+        @app.get("/")
+        async def root() -> FileResponse:
+            return FileResponse(str(static_dir / "index.html"))
 
     return app
 

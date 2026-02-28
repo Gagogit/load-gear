@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOAD-GEAR Pipeline</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --border: #0f3460;
+  --text: #e0e0e0;
+  --text-muted: #8893a7;
+  --accent: #0f3460;
+  --green: #00c853;
+  --grey: #555;
+  --red: #ff1744;
+  --input-bg: #0f3460;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+.container {
+  max-width: 900px;
+  width: 100%;
+}
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  color: #fff;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.card h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 600px) {
+  .form-grid { grid-template-columns: 1fr; }
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.form-group.full { grid-column: 1 / -1; }
+label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+input[type="text"], input[type="date"] {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+input:focus {
+  border-color: var(--green);
+}
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.drop-zone.dragover {
+  border-color: var(--green);
+  background: rgba(0, 200, 83, 0.05);
+}
+.drop-zone.has-file {
+  border-color: var(--green);
+  color: var(--green);
+}
+.drop-zone input[type="file"] { display: none; }
+.btn-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+button {
+  padding: 0.7rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+button:active { transform: scale(0.97); }
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-upload {
+  background: var(--green);
+  color: #000;
+}
+.btn-download {
+  background: var(--accent);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.led-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.led-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.led-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--grey);
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.led-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.led-dot.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.led-label {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.error-box {
+  background: rgba(255, 23, 68, 0.1);
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--red);
+  display: none;
+}
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--grey);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.status-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>LOAD-GEAR Pipeline</h1>
+
+  <div class="card">
+    <h2>Eingabe</h2>
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="project_name">Projektname</label>
+        <input type="text" id="project_name" placeholder="z.B. Analyse Q1 2026">
+      </div>
+      <div class="form-group">
+        <label for="malo_id">MaLo-ID</label>
+        <input type="text" id="malo_id" placeholder="DE00012345...">
+      </div>
+      <div class="form-group">
+        <label for="plz">PLZ</label>
+        <input type="text" id="plz" placeholder="80331" maxlength="5">
+      </div>
+      <div class="form-group">
+        <label for="user_id">Benutzer-ID</label>
+        <input type="text" id="user_id" placeholder="user@example.com">
+      </div>
+      <div class="form-group">
+        <label for="prognosis_from">Prognose von</label>
+        <input type="date" id="prognosis_from">
+      </div>
+      <div class="form-group">
+        <label for="prognosis_to">Prognose bis</label>
+        <input type="date" id="prognosis_to">
+      </div>
+      <div class="form-group full">
+        <label>Datei (CSV)</label>
+        <div class="drop-zone" id="drop_zone">
+          Datei hierher ziehen oder klicken
+          <input type="file" id="file_input" accept=".csv,.xlsx,.xls">
+        </div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-upload" id="btn_upload">Upload &amp; Start</button>
+      <button class="btn-download" id="btn_download" disabled>Download Ergebnis</button>
+    </div>
+    <div class="error-box" id="error_box"></div>
+    <div class="status-text" id="status_text"></div>
+  </div>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div class="led-list" id="led_list">
+      <div class="led-item"><div class="led-dot" id="led_1"></div><span class="led-label">1. Upload erfolgreich</span></div>
+      <div class="led-item"><div class="led-dot" id="led_2"></div><span class="led-label">2. Format erkannt</span></div>
+      <div class="led-item"><div class="led-dot" id="led_3"></div><span class="led-label">3. Original gespeichert</span></div>
+      <div class="led-item"><div class="led-dot" id="led_4"></div><span class="led-label">4. Header extrahiert</span></div>
+      <div class="led-item"><div class="led-dot" id="led_5"></div><span class="led-label">5. Zeitreihen erkannt</span></div>
+      <div class="led-item"><div class="led-dot" id="led_6"></div><span class="led-label">6. Zeitreihen verbessert</span></div>
+      <div class="led-item"><div class="led-dot" id="led_7"></div><span class="led-label">7. Statistik erstellt</span></div>
+      <div class="led-item"><div class="led-dot" id="led_8"></div><span class="led-label">8. Mit Wetterdaten angereichert</span></div>
+      <div class="led-item"><div class="led-dot" id="led_9"></div><span class="led-label">9. Auf Zeitraum prognostiziert</span></div>
+      <div class="led-item"><div class="led-dot" id="led_10"></div><span class="led-label">10. Fertig zu Output</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const $ = (id) => document.getElementById(id);
+  let currentJobId = null;
+  let pollTimer = null;
+
+  // Drag & drop
+  const dropZone = $('drop_zone');
+  const fileInput = $('file_input');
+
+  dropZone.addEventListener('click', () => fileInput.click());
+
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('dragover');
+  });
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) {
+      fileInput.files = e.dataTransfer.files;
+      showFileName();
+    }
+  });
+  fileInput.addEventListener('change', showFileName);
+
+  function showFileName() {
+    if (fileInput.files.length) {
+      dropZone.textContent = fileInput.files[0].name;
+      dropZone.classList.add('has-file');
+    }
+  }
+
+  // Reset LEDs
+  function resetLeds() {
+    for (let i = 1; i <= 10; i++) {
+      const dot = $('led_' + i);
+      dot.className = 'led-dot';
+    }
+  }
+
+  // Update LEDs from response
+  function updateLeds(leds) {
+    for (let i = 1; i <= 10; i++) {
+      const dot = $('led_' + i);
+      dot.className = 'led-dot' + (leds[String(i)] ? ' green' : '');
+    }
+  }
+
+  function showError(msg) {
+    const box = $('error_box');
+    box.textContent = msg;
+    box.style.display = 'block';
+  }
+
+  function hideError() {
+    $('error_box').style.display = 'none';
+  }
+
+  function setStatus(msg) {
+    $('status_text').innerHTML = msg;
+  }
+
+  // Upload & Run
+  $('btn_upload').addEventListener('click', async () => {
+    hideError();
+    resetLeds();
+    currentJobId = null;
+    $('btn_download').disabled = true;
+
+    if (!fileInput.files.length) {
+      showError('Bitte eine Datei auswaehlen.');
+      return;
+    }
+
+    const form = new FormData();
+    form.append('project_name', $('project_name').value);
+    form.append('malo_id', $('malo_id').value);
+    form.append('plz', $('plz').value);
+    form.append('user_id', $('user_id').value);
+    form.append('prognosis_from', $('prognosis_from').value);
+    form.append('prognosis_to', $('prognosis_to').value);
+    form.append('file', fileInput.files[0]);
+
+    $('btn_upload').disabled = true;
+    setStatus('<span class="spinner"></span> Pipeline laeuft...');
+
+    try {
+      const resp = await fetch('/api/v1/pipeline/run', { method: 'POST', body: form });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        showError(data.detail || JSON.stringify(data));
+        $('btn_upload').disabled = false;
+        setStatus('');
+        return;
+      }
+
+      currentJobId = data.job_id;
+      if (data.leds) updateLeds(data.leds);
+
+      if (data.status === 'failed') {
+        showError(data.error_message || 'Pipeline fehlgeschlagen');
+        setStatus('Fehlgeschlagen');
+        // Mark last false LED as red
+        markFailedLed(data.leds);
+      } else if (data.status === 'done' || data.status === 'warn') {
+        setStatus('Abgeschlossen');
+        $('btn_download').disabled = false;
+      } else {
+        // Start polling
+        startPoll();
+      }
+    } catch (err) {
+      showError('Netzwerkfehler: ' + err.message);
+      setStatus('');
+    } finally {
+      $('btn_upload').disabled = false;
+    }
+  });
+
+  function markFailedLed(leds) {
+    // Find the first false LED and mark it red
+    for (let i = 1; i <= 10; i++) {
+      if (!leds[String(i)]) {
+        $('led_' + i).className = 'led-dot red';
+        break;
+      }
+    }
+  }
+
+  function startPoll() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollStatus, 2000);
+  }
+
+  async function pollStatus() {
+    if (!currentJobId) return;
+    try {
+      const resp = await fetch('/api/v1/pipeline/' + currentJobId + '/status');
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      updateLeds(data.leds);
+
+      if (data.status === 'done' || data.status === 'warn') {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        setStatus('Abgeschlossen');
+        $('btn_download').disabled = false;
+      } else if (data.status === 'failed') {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        showError(data.error_message || 'Pipeline fehlgeschlagen');
+        setStatus('Fehlgeschlagen');
+        markFailedLed(data.leds);
+      }
+    } catch (err) {
+      // Ignore poll errors
+    }
+  }
+
+  // Download
+  $('btn_download').addEventListener('click', async () => {
+    if (!currentJobId) return;
+    try {
+      const resp = await fetch('/api/v1/pipeline/' + currentJobId + '/download');
+      if (!resp.ok) {
+        const err = await resp.json();
+        showError(err.detail || 'Download fehlgeschlagen');
+        return;
+      }
+      const blob = await resp.blob();
+      const cd = resp.headers.get('Content-Disposition') || '';
+      const match = cd.match(/filename="?([^"]+)"?/);
+      const fname = match ? match[1] : 'result.csv';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      showError('Download Fehler: ' + err.message);
+    }
+  });
+})();
+</script>
+</body>
+</html>
