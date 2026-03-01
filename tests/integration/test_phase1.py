@@ -5,6 +5,7 @@ This is the final acceptance test for Phase 1 (Foundation).
 """
 
 import hashlib
+import uuid
 from pathlib import Path
 
 import pytest
@@ -48,8 +49,9 @@ async def test_phase1_full_scenario(client: AsyncClient) -> None:
     assert job_data["status"] == "pending"
     assert job_data["meter_id"] == "DE0009876543210000000000000000001"
 
-    # --- Step B: Upload sample CSV ---
-    csv_content = SAMPLE_CSV.read_bytes()
+    # --- Step B: Upload sample CSV (unique per run to avoid dedup) ---
+    raw = SAMPLE_CSV.read_bytes()
+    csv_content = raw + f"\n# {uuid.uuid4()}\n".encode()
     expected_sha256 = hashlib.sha256(csv_content).hexdigest()
 
     upload_resp = await client.post(
