@@ -353,3 +353,32 @@ def test_normalize_colon_datetime() -> None:
     assert len(rows) == 2
     assert stats["valid_rows"] == 2
     assert rows[0]["value"] == 12.5
+
+
+def test_normalize_single_digit_hour() -> None:
+    """CSV with single-digit hours (0:15) normalizes correctly."""
+    csv = (
+        b"Zeitstempel;Wert (kWh)\n"
+        b"01.01.2025 0:15;12,5\n"
+        b"01.01.2025 0:30;13,2\n"
+    )
+    job_id, file_id = _make_ids()
+    rules = {
+        "encoding": "utf-8",
+        "delimiter": ";",
+        "header_row": 0,
+        "timestamp_columns": ["Zeitstempel"],
+        "value_column": "Wert (kWh)",
+        "date_format": "%d.%m.%Y %H:%M",
+        "time_format": "",
+        "decimal_separator": ",",
+        "unit": "kWh",
+        "series_type": "interval",
+        "timezone": "Europe/Berlin",
+    }
+    rows, stats = normalize(
+        csv, rules, meter_id="SDHOUR", job_id=job_id, source_file_id=file_id
+    )
+    assert len(rows) == 2
+    assert stats["valid_rows"] == 2
+    assert rows[0]["value"] == 12.5
