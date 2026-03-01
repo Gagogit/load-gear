@@ -58,7 +58,23 @@ Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 - **Context on all errors**: encoding failures, too-few-rows, no-data-rows, Polars parse failures, Excel row count, unsupported timestamp config — all have context dicts
 - **Job persistence**: `error_context` JSONB column on `control.jobs`, set in both ParseError/NormalizationError and generic Exception paths
 - **API exposure**: `PipelineStatusResponse.error_context` returned by GET `/api/v1/pipeline/{job_id}/status`
-- **360 tests** all passing (1 pre-existing flaky test excluded)
+- **360 tests** all passing
+
+## Colon-Heuristic Datetime Detection (DONE)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| CH-01 | `_split_datetime_by_colon()` — colon as exclusive time anchor, dynamic separator detection | done |
+| CH-02 | `_heuristic_datetime_format()` — split samples, detect date/time independently, combine | done |
+| CH-03 | Fallback in `detect_datetime_format()` — pattern match first, heuristic second | done |
+| CH-04 | Tests (9 new → 369 total) | done |
+
+### Key Deliverables
+- **Colon heuristic**: `:` appears exclusively in time portions — regex `(?<!\d)(\d{1,2}:\d{2}(?::\d{2})?)$` locates time tail, negative lookbehind prevents year match
+- **Dynamic separator**: scans backwards from time start to find any separator (space, colon, T, etc.) — no new patterns needed for future separators
+- **Single-digit hours**: `0:15`, `9:00` now detected correctly (was: `Cannot detect datetime format`)
+- **Composable**: splits into date + time parts, delegates to existing `detect_date_format` / `detect_time_format` — all existing date/time formats automatically work in combined mode
+- **369 tests** all passing
 
 ## Bugfix: Weather Observation Upsert (DONE)
 
@@ -121,5 +137,5 @@ Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 - **9 job states**: PENDING → INGESTING → QA_RUNNING → ANALYSIS_RUNNING → FORECAST_RUNNING → FINANCIAL_RUNNING → DONE/WARN/FAILED
 - **35 API endpoints** across 10 routers
 - **13 repositories**
-- **360 tests** all passing
+- **369 tests** all passing
 - **Full pipeline**: job → ingest → QA → analysis (with weather + assets) → forecast → financial → done

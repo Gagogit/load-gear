@@ -102,3 +102,10 @@
 68. [x] EC-04 — Persist `error_context` on Job in ingest_service except blocks
 69. [x] EC-05 — Extend PipelineStatusResponse + pipeline status endpoint with `error_context`
 70. [x] EC-06 — Tests (7 new → 360 total)
+
+## Colon-Heuristic Datetime Detection
+
+71. [x] CH-01 — `_split_datetime_by_colon()`: colon as exclusive time anchor, dynamic separator detection
+72. [x] CH-02 — `_heuristic_datetime_format()`: split samples, detect date/time independently, combine
+73. [x] CH-03 — Fallback in `detect_datetime_format()`: pattern match first, heuristic second
+74. [x] CH-04 — Tests (9 new → 369 total)
