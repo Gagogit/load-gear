@@ -42,6 +42,24 @@ Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 - **Frontend**: `.error-detail` box shows column names, sample data, hints in monospace; XSS-safe
 - **321 tests** all passing
 
+## Structured Error Context Persistence (DONE)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| EC-01 | Add `error_context` JSONB column to Job model + Alembic migration 006 | done |
+| EC-02 | Wrap ValueError → ParseError in format_detector.py (date/time/datetime detection) | done |
+| EC-03 | Add missing context dicts to all ParseError/NormalizationError raises | done |
+| EC-04 | Persist `error_context` on Job in ingest_service except blocks | done |
+| EC-05 | Extend PipelineStatusResponse + pipeline status endpoint with `error_context` | done |
+| EC-06 | Tests (7 new → 360 total) | done |
+
+### Key Deliverables
+- **ValueError wrapping**: `detect_date_format`, `detect_time_format`, `detect_datetime_format` failures now raise `ParseError` with context (columns, sample_values, hint)
+- **Context on all errors**: encoding failures, too-few-rows, no-data-rows, Polars parse failures, Excel row count, unsupported timestamp config — all have context dicts
+- **Job persistence**: `error_context` JSONB column on `control.jobs`, set in both ParseError/NormalizationError and generic Exception paths
+- **API exposure**: `PipelineStatusResponse.error_context` returned by GET `/api/v1/pipeline/{job_id}/status`
+- **360 tests** all passing (1 pre-existing flaky test excluded)
+
 ## Bugfix: Weather Observation Upsert (DONE)
 
 | Task | Description | Status |
@@ -99,9 +117,9 @@ Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
 
 ## Platform Summary (after Phase 7)
 - **14 tables** across 3 schemas (control/4, data/7, analysis/3)
-- **4 Alembic migrations**
+- **5 Alembic migrations**
 - **9 job states**: PENDING → INGESTING → QA_RUNNING → ANALYSIS_RUNNING → FORECAST_RUNNING → FINANCIAL_RUNNING → DONE/WARN/FAILED
 - **35 API endpoints** across 10 routers
 - **13 repositories**
-- **321 tests** all passing
+- **360 tests** all passing
 - **Full pipeline**: job → ingest → QA → analysis (with weather + assets) → forecast → financial → done

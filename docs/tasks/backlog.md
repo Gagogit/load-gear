@@ -93,3 +93,12 @@
 62. [x] DM-04 — Rewire forecast_service: replace Prophet with day_matcher, model_alias "day_match"
 63. [x] DM-05 — Update calendar_mapping similarity map + `_classify_date` with new day types
 64. [x] DM-06 — Tests: 3 day_classifier + 5 day_matcher + existing test updates (353 total)
+
+## Structured Error Context Persistence
+
+65. [x] EC-01 — Add `error_context` JSONB column to Job model + Alembic migration 006
+66. [x] EC-02 — Wrap ValueError → ParseError in format_detector.py (date/time/datetime detection)
+67. [x] EC-03 — Add missing context dicts to all ParseError/NormalizationError raises
+68. [x] EC-04 — Persist `error_context` on Job in ingest_service except blocks
+69. [x] EC-05 — Extend PipelineStatusResponse + pipeline status endpoint with `error_context`
+70. [x] EC-06 — Tests (7 new → 360 total)
