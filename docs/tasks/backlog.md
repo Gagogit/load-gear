@@ -109,3 +109,17 @@
 72. [x] CH-02 — `_heuristic_datetime_format()`: split samples, detect date/time independently, combine
 73. [x] CH-03 — Fallback in `detect_datetime_format()`: pattern match first, heuristic second
 74. [x] CH-04 — Tests (9 new → 369 total)
+
+## Phase 8 — Multi-Provider HPFC
+
+75. [x] MP-01 — Add `provider_id` column to FinancialRun ORM + Alembic migration 007
+76. [x] MP-02 — `hpfc_snapshot_repo`: `get_latest_covering_by_provider()`, `list_providers()`
+77. [x] MP-03 — `financial_run_repo`: `list_by_job_id()`, `get_latest_by_job_id()` alias
+78. [x] MP-04 — `financial_service`: extract `_calc_single()`, implement `run_financial_multi()`, `get_financial_results()`
+79. [x] MP-05 — Thread `provider_ids` through `pipeline_service` → `run_financial_multi()`
+80. [x] MP-06 — Pydantic schemas: `ProviderFinancialResult`, `FinancialMultiResultResponse`, `ProviderListResponse`
+81. [x] MP-07 — API routes: POST /calculate (multi), GET /result (all), GET /result/{provider_id}, GET /export?provider_id=
+82. [x] MP-08 — GET /hpfc/providers endpoint
+83. [x] MP-09 — Pipeline route: `provider_ids` form field
+84. [x] MP-10 — Frontend: provider multiselect dropdown + Anbietervergleich result table
+85. [x] MP-11 — Tests: 6 new multi-provider tests + existing test updates (377 total)

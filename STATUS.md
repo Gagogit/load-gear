@@ -1,141 +1,66 @@
 # STATUS — Current Phase
 
-Phases 1–7 complete. Phase 6 archived to docs/status/STATUS_phase6.md.
+Phases 1–7 complete. Phase 7 archived to docs/status/STATUS_phase7_full.md.
 
-## Day-Type Matching Forecast (DONE)
+## Phase 8 — Multi-Provider HPFC (DONE)
 
 | Task | Description | Status |
 |------|-------------|--------|
-| DM-01 | Extend day_classifier with 2 new types + `_is_non_workday` helper | done |
-| DM-02 | Create `day_matcher.py` (day-type interval averaging + percentage scaling) | done |
-| DM-03 | Add `growth_pct` form field + route param + pipeline threading | done |
-| DM-04 | Rewire forecast_service: Prophet → day_matcher, model_alias → "day_match" | done |
-| DM-05 | Update calendar_mapping similarity map with new types | done |
-| DM-06 | Tests (8 new → 353 total) | done |
+| MP-01 | Add `provider_id` column to FinancialRun ORM + Alembic migration 007 | done |
+| MP-02 | `hpfc_snapshot_repo`: `get_latest_covering_by_provider()`, `list_providers()` | done |
+| MP-03 | `financial_run_repo`: `list_by_job_id()`, `get_latest_by_job_id()` alias | done |
+| MP-04 | `financial_service`: extract `_calc_single()`, implement `run_financial_multi()`, `get_financial_results()` | done |
+| MP-05 | Thread `provider_ids` through `pipeline_service` → `run_financial_multi()` | done |
+| MP-06 | Pydantic schemas: `ProviderFinancialResult`, `FinancialMultiResultResponse`, `ProviderListResponse` | done |
+| MP-07 | API routes: POST /calculate (multi), GET /result (all), GET /result/{provider_id}, GET /export?provider_id= | done |
+| MP-08 | GET /hpfc/providers endpoint (route before /{snapshot_id}) | done |
+| MP-09 | Pipeline route: `provider_ids` form field, comma-separated parsing | done |
+| MP-10 | Frontend: provider multiselect dropdown + Anbietervergleich result table | done |
+| MP-11 | Tests: 6 new multi-provider tests + existing test updates (377 total) | done |
 
 ### Key Deliverables
-- **2 new day types**: Werktag-nach-Frei (workday after free day), Werktag-vor-Frei (workday before free day) — total 9 types
-- **Day matcher**: groups historical v2 by (day_type, interval_index), averages matching intervals, scales by user percentage
-- **Fallback chain**: exact type → similar type → global average → 0.0; Störung days excluded from pool
-- **Prozentwert**: frontend input (0–500%), threaded through route → pipeline → forecast as `growth_pct`
-- **Prophet dormant**: `prophet_trainer.py` kept untouched, import removed from forecast_service
-- **Deterministic output**: q10 = q50 = q90 = y_hat (no uncertainty bands)
-- **353 tests** all passing
+- **1:N Financial**: one ForecastRun produces multiple FinancialRuns, one per provider + baseline
+- **Baseline always**: computed regardless of provider_ids, uses any available HPFC snapshot
+- **Graceful errors**: missing provider HPFC produces error entry in results, no pipeline abort
+- **Provider filter**: `get_latest_covering_by_provider()` filters by provider_id + delivery range
+- **Provider list**: `GET /hpfc/providers` returns distinct provider_ids for frontend dropdown
+- **Per-provider detail**: `GET /financial/{job_id}/result/{provider_id}` returns full cost rows
+- **Export per provider**: `GET /financial/{job_id}/export?provider_id=X` exports specific provider CSV
+- **Backward compat**: `run_financial()` delegates to `run_financial_multi()`, old callers still work
+- **Frontend**: multiselect dropdown loads providers from API, result table shows cost comparison per provider
+- **377 tests** all passing
 
-## Robust Column Detection + Parse Error Context (DONE)
+### Architecture
+```
+Job → forecast_running → financial_running
+  → run_financial_multi(job_id, provider_ids=["vattenfall", "eon"])
+    → _calc_single(provider_id="baseline", snapshot=any)     → FinancialRun
+    → _calc_single(provider_id="vattenfall", snapshot=vf)    → FinancialRun
+    → _calc_single(provider_id="eon", snapshot=None)         → error entry
+  → job.status = DONE
+```
 
-| Task | Description | Status |
-|------|-------------|--------|
-| CD-01 | Extended date/time formats (2-digit year, colon separator) | done |
-| CD-02 | Expanded column keyword sets + substring matching | done |
-| CD-03 | Structured ParseError/NormalizationError with context dict | done |
-| CD-04 | Error context propagation through pipeline to frontend | done |
-| CD-05 | Frontend error detail display (columns, samples, hints) | done |
-| CD-06 | Tests (12 new → 321 total) | done |
+### Files Changed (14)
+1. `src/load_gear/models/data.py` — provider_id on FinancialRun
+2. `alembic/versions/007_add_financial_provider_id.py` — migration
+3. `src/load_gear/repositories/hpfc_snapshot_repo.py` — 2 new methods
+4. `src/load_gear/repositories/financial_run_repo.py` — 2 new methods
+5. `src/load_gear/services/financial/financial_service.py` — refactored (multi-provider)
+6. `src/load_gear/services/pipeline_service.py` — provider_ids param
+7. `src/load_gear/models/schemas.py` — 3 new schemas
+8. `src/load_gear/api/routes/financial.py` — 4 endpoints updated/added
+9. `src/load_gear/api/routes/hpfc.py` — GET /providers
+10. `src/load_gear/api/routes/pipeline.py` — provider_ids form field
+11. `src/load_gear/static/index.html` — dropdown + result table
+12. `tests/test_financial_multi_provider.py` — 6 new tests
+13. `tests/test_financial_api.py` — adapted to multi-provider response
+14. `tests/integration/test_phase6.py` — adapted to multi-provider response
 
-### Key Deliverables
-- **Date formats**: `dd.mm.yy` (2-digit year), `dd.mm.yyyy:hh:mm` (colon separator), 5 new format entries
-- **Column detection**: expanded to 11 timestamp keywords + 15 value keywords (Last, Bezug, Wirkleistung, Einspeisung, etc.)
-- **Substring matching**: "Wirkleistung" matches via "leistung" substring
-- **Unit from column name**: kW vs kWh detected from column header (e.g. "Leistung (kW)" → kW)
-- **Structured errors**: `ParseError.context` / `NormalizationError.context` with columns, sample_values, hints
-- **Frontend**: `.error-detail` box shows column names, sample data, hints in monospace; XSS-safe
-- **321 tests** all passing
-
-## Structured Error Context Persistence (DONE)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| EC-01 | Add `error_context` JSONB column to Job model + Alembic migration 006 | done |
-| EC-02 | Wrap ValueError → ParseError in format_detector.py (date/time/datetime detection) | done |
-| EC-03 | Add missing context dicts to all ParseError/NormalizationError raises | done |
-| EC-04 | Persist `error_context` on Job in ingest_service except blocks | done |
-| EC-05 | Extend PipelineStatusResponse + pipeline status endpoint with `error_context` | done |
-| EC-06 | Tests (7 new → 360 total) | done |
-
-### Key Deliverables
-- **ValueError wrapping**: `detect_date_format`, `detect_time_format`, `detect_datetime_format` failures now raise `ParseError` with context (columns, sample_values, hint)
-- **Context on all errors**: encoding failures, too-few-rows, no-data-rows, Polars parse failures, Excel row count, unsupported timestamp config — all have context dicts
-- **Job persistence**: `error_context` JSONB column on `control.jobs`, set in both ParseError/NormalizationError and generic Exception paths
-- **API exposure**: `PipelineStatusResponse.error_context` returned by GET `/api/v1/pipeline/{job_id}/status`
-- **360 tests** all passing
-
-## Colon-Heuristic Datetime Detection (DONE)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| CH-01 | `_split_datetime_by_colon()` — colon as exclusive time anchor, dynamic separator detection | done |
-| CH-02 | `_heuristic_datetime_format()` — split samples, detect date/time independently, combine | done |
-| CH-03 | Fallback in `detect_datetime_format()` — pattern match first, heuristic second | done |
-| CH-04 | Tests (9 new → 369 total) | done |
-
-### Key Deliverables
-- **Colon heuristic**: `:` appears exclusively in time portions — regex `(?<!\d)(\d{1,2}:\d{2}(?::\d{2})?)$` locates time tail, negative lookbehind prevents year match
-- **Dynamic separator**: scans backwards from time start to find any separator (space, colon, T, etc.) — no new patterns needed for future separators
-- **Single-digit hours**: `0:15`, `9:00` now detected correctly (was: `Cannot detect datetime format`)
-- **Composable**: splits into date + time parts, delegates to existing `detect_date_format` / `detect_time_format` — all existing date/time formats automatically work in combined mode
-- **369 tests** all passing
-
-## Bugfix: Weather Observation Upsert (DONE)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| BF-01 | Fix `upsert_with_location` UniqueViolation on repeated pipeline runs | done |
-
-- **Root cause**: `weather_observation_repo.upsert_with_location()` used plain `session.add()` (INSERT), causing `UniqueViolation` on `(ts_utc, station_id)` PK when weather data already existed for a location
-- **Fix**: replaced with `pg_insert().on_conflict_do_update()` — re-runs now update existing rows instead of crashing
-- **Verified**: XLSX pipeline upload → all 10 LEDs green, 310 tests passing
-
-## Ingest Rework — XLS/XLSX Support + Variable Header Detection (DONE)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| IR-01 | Install clevercsv + xlrd dependencies | done |
-| IR-02 | File-type detection (magic bytes: XLSX/XLS/CSV) + Excel→rows conversion | done |
-| IR-03 | New `_find_data_boundary()` algorithm (skip metadata, find header) | done |
-| IR-04 | Refactor `detect_format()` to work on uniform `list[list[str]]` rows | done |
-| IR-05 | clevercsv fallback in delimiter detector | done |
-| IR-06 | Normalizer XLS/XLSX reading path (`_read_excel()`) | done |
-| IR-07 | Test fixtures + 18 new tests (310 total) | done |
-
-### Key Deliverables
-- **File type detection**: magic bytes (`PK\x03\x04`=XLSX, `\xd0\xcf\x11\xe0`=XLS, else CSV)
-- **Excel conversion**: openpyxl (XLSX) / xlrd (XLS) → uniform `list[list[str]]` rows
-- **Header detection rework**: `_find_data_boundary()` scans up to 50 rows for first data row (date+numeric), searches backwards for header using domain keywords (Datum, Wert, kWh, etc.)
-- **clevercsv**: fallback between csv.Sniffer and frequency analysis for messy CSV dialects
-- **Normalizer**: separate `_read_csv()` / `_read_excel()` paths, `file_type` in rules dict
-- **New fixture**: `german_with_header.csv` (5-line metadata preamble)
-- **310 tests** all passing
-
-## Phase 7 — Weather Integration & Asset Intelligence (DONE)
-
-| Task | Description | Status |
-|------|-------------|--------|
-| T-035 | DWD Weather Station Import Service | done |
-| T-036 | Weather API Fallback (BrightSky + Open-Meteo) | done |
-| T-037 | Spatial-Temporal Join + Weather Correlation Engine | done |
-| T-038 | Asset Fingerprinting Implementation (PV/Battery/KWK) | done |
-| T-039 | Enhanced Imputation (flag=3) + Forecast Strategies | done |
-| T-040 | Weather Admin Endpoints (4 on /api/v1/weather) | done |
-| T-041 | PLZ Geocoding Service (909 centroids) | done |
-| T-042 | Phase 7 Tests + Integration Test (62 new → 292 total) | done |
-
-### Key Deliverables
-- **weather_observation_repo**: 8 async functions (CRUD + PostGIS KNN)
-- **DWD import**: Polars CSV parser, J/cm²→W/m², CET→UTC, station catalog
-- **API fallback**: BrightSky (conf=0.8) → Open-Meteo (conf=0.6), 10km cache dedup
-- **Correlation engine**: temp/GHI/wind sensitivity, lag analysis (-3h to +3h)
-- **Asset fingerprinting**: PV (midday dip + GHI corr), Battery (night charge + variance), KWK (baseload CV + seasonal)
-- **Weather imputation**: flag=3 (profile × weather regression), clamped ±30%
-- **Forecast strategies**: weather_conditioned (temp/GHI deviation), asset_scenarios (PV/battery/KWK modifiers)
-- **PLZ geocoding**: 909 centroids, 3-digit/2-digit prefix fallback
-- **4 admin endpoints**: POST import, GET stations, GET observations, DELETE station
-
-## Platform Summary (after Phase 7)
+## Platform Summary (after Phase 8)
 - **14 tables** across 3 schemas (control/4, data/7, analysis/3)
-- **5 Alembic migrations**
+- **7 Alembic migrations**
 - **9 job states**: PENDING → INGESTING → QA_RUNNING → ANALYSIS_RUNNING → FORECAST_RUNNING → FINANCIAL_RUNNING → DONE/WARN/FAILED
-- **35 API endpoints** across 10 routers
+- **38 API endpoints** across 10 routers
 - **13 repositories**
-- **369 tests** all passing
-- **Full pipeline**: job → ingest → QA → analysis (with weather + assets) → forecast → financial → done
+- **377 tests** all passing
+- **Full pipeline**: job → ingest → QA → analysis → forecast → financial (multi-provider) → done
