@@ -128,7 +128,7 @@ async def _prepare_for_financial(client: AsyncClient) -> tuple[str, str]:
 
 @pytest.mark.asyncio
 async def test_calculate_financial_returns_202(client: AsyncClient) -> None:
-    """POST /financial/calculate with valid job returns 202."""
+    """POST /financial/calculate with valid job returns 202 with multi-provider results."""
     job_id, snapshot_id = await _prepare_for_financial(client)
 
     resp = await client.post("/api/v1/financial/calculate", json={
@@ -137,10 +137,12 @@ async def test_calculate_financial_returns_202(client: AsyncClient) -> None:
     })
     assert resp.status_code == 202
     data = resp.json()
-    assert "calc_id" in data
-    assert data["total_cost_eur"] > 0
-    assert data["matched_intervals"] > 0
-    assert len(data["monthly_summary"]) >= 1
+    assert "results" in data
+    assert len(data["results"]) >= 1
+    baseline = data["results"][0]
+    assert baseline["provider_id"] == "baseline"
+    assert baseline["status"] == "ok"
+    assert baseline["total_cost_eur"] > 0
 
 
 @pytest.mark.asyncio
@@ -164,7 +166,7 @@ async def test_calculate_financial_wrong_status_returns_409(client: AsyncClient)
 
 @pytest.mark.asyncio
 async def test_get_financial_result(client: AsyncClient) -> None:
-    """GET /financial/{job_id}/result returns cost time series."""
+    """GET /financial/{job_id}/result returns multi-provider results."""
     job_id, snapshot_id = await _prepare_for_financial(client)
     await client.post("/api/v1/financial/calculate", json={
         "job_id": job_id,
@@ -174,10 +176,20 @@ async def test_get_financial_result(client: AsyncClient) -> None:
     resp = await client.get(f"/api/v1/financial/{job_id}/result")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total_cost_eur"] > 0
-    assert len(data["rows"]) > 0
-    assert len(data["monthly_summary"]) >= 1
-    for row in data["rows"]:
+    assert "results" in data
+    assert len(data["results"]) >= 1
+    baseline = data["results"][0]
+    assert baseline["provider_id"] == "baseline"
+    assert baseline["total_cost_eur"] > 0
+
+    # Also test per-provider endpoint for detailed rows
+    resp2 = await client.get(f"/api/v1/financial/{job_id}/result/baseline")
+    assert resp2.status_code == 200
+    detail = resp2.json()
+    assert detail["total_cost_eur"] > 0
+    assert len(detail["rows"]) > 0
+    assert len(detail["monthly_summary"]) >= 1
+    for row in detail["rows"]:
         assert "ts_utc" in row
         assert "consumption_kwh" in row
         assert "price_mwh" in row

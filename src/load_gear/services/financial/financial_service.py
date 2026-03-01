@@ -11,7 +11,7 @@ import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from load_gear.models.control import JobStatus
-from load_gear.models.data import FinancialRun
+from load_gear.models.data import FinancialRun, HpfcSnapshot, ForecastSeries
 from load_gear.repositories import (
     job_repo,
     forecast_run_repo,
@@ -29,24 +29,143 @@ class FinancialError(Exception):
     pass
 
 
-async def run_financial(
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+async def _build_price_map(
+    session: AsyncSession,
+    snapshot: HpfcSnapshot,
+) -> dict[datetime, float]:
+    """Load HPFC series for a snapshot and return ts_naive → price lookup."""
+    hpfc_rows = await hpfc_series_repo.get_all_by_snapshot_id(session, snapshot.id)
+    if not hpfc_rows:
+        raise FinancialError(f"HPFC snapshot {snapshot.id} has no series data")
+    return {
+        r.ts_utc.replace(tzinfo=None) if r.ts_utc.tzinfo else r.ts_utc: r.price_mwh
+        for r in hpfc_rows
+    }
+
+
+def _compute_costs(
+    fc_rows: list[ForecastSeries],
+    price_map: dict[datetime, float],
+) -> tuple[list[dict], float, list[dict]]:
+    """Vector-multiply forecast × HPFC.
+
+    Returns (cost_rows, total_cost, monthly_summary).
+    """
+    if len(fc_rows) >= 2:
+        delta = (fc_rows[1].ts_utc - fc_rows[0].ts_utc).total_seconds()
+        interval_minutes = max(int(delta / 60), 15)
+    else:
+        interval_minutes = 15
+
+    hours_per_interval = interval_minutes / 60.0
+    cost_rows: list[dict] = []
+
+    for fr in fc_rows:
+        ts = fr.ts_utc
+        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
+
+        price = price_map.get(ts_naive)
+        if price is None:
+            ts_hour = ts_naive.replace(minute=0, second=0, microsecond=0)
+            price = price_map.get(ts_hour)
+        if price is None:
+            continue
+
+        consumption_kwh = fr.y_hat * hours_per_interval
+        cost_eur = (consumption_kwh / 1000.0) * price
+
+        cost_rows.append({
+            "ts_utc": ts,
+            "consumption_kwh": consumption_kwh,
+            "price_mwh": price,
+            "cost_eur": cost_eur,
+        })
+
+    if not cost_rows:
+        raise FinancialError("No overlapping timestamps between forecast and HPFC")
+
+    total_cost = sum(r["cost_eur"] for r in cost_rows)
+
+    monthly: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "kwh": 0.0, "prices": []})
+    for r in cost_rows:
+        ts = r["ts_utc"]
+        month_key = ts.strftime("%Y-%m") if hasattr(ts, "strftime") else str(ts)[:7]
+        monthly[month_key]["cost"] += r["cost_eur"]
+        monthly[month_key]["kwh"] += r["consumption_kwh"]
+        monthly[month_key]["prices"].append(r["price_mwh"])
+
+    monthly_summary = [
+        {
+            "month": k,
+            "total_cost_eur": round(v["cost"], 4),
+            "total_kwh": round(v["kwh"], 4),
+            "avg_price_mwh": round(float(np.mean(v["prices"])), 4),
+        }
+        for k, v in sorted(monthly.items())
+    ]
+
+    return cost_rows, round(total_cost, 4), monthly_summary
+
+
+async def _calc_single(
+    session: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    forecast_run_id: uuid.UUID,
+    meter_id: str,
+    provider_id: str,
+    snapshot: HpfcSnapshot,
+    fc_rows: list[ForecastSeries],
+) -> dict:
+    """Run a single provider calculation, store FinancialRun, return result dict."""
+    price_map = await _build_price_map(session, snapshot)
+    cost_rows, total_cost, monthly_summary = _compute_costs(fc_rows, price_map)
+
+    fin_run = FinancialRun(
+        id=uuid.uuid4(),
+        job_id=job_id,
+        forecast_run_id=forecast_run_id,
+        hpfc_snapshot_id=snapshot.id,
+        meter_id=meter_id,
+        provider_id=provider_id,
+        status="ok",
+        total_cost_eur=total_cost,
+        monthly_summary=monthly_summary,
+        completed_at=datetime.now(timezone.utc),
+    )
+    await financial_run_repo.create(session, fin_run)
+
+    return {
+        "provider_id": provider_id,
+        "calc_id": str(fin_run.id),
+        "status": "ok",
+        "total_cost_eur": total_cost,
+        "monthly_summary": monthly_summary,
+        "matched_intervals": len(cost_rows),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public API — multi-provider
+# ---------------------------------------------------------------------------
+
+async def run_financial_multi(
     session: AsyncSession,
     job_id: uuid.UUID,
     *,
+    provider_ids: list[str] | None = None,
     snapshot_id: uuid.UUID | None = None,
 ) -> dict:
-    """Run cost calculation: forecast × HPFC = cost time series.
+    """Run cost calculation for multiple providers.
 
-    Steps:
-    1. Validate job is in financial_running state
-    2. Fetch forecast series (v3)
-    3. Find matching HPFC snapshot
-    4. Align timestamps and vector multiply
-    5. Aggregate monthly summaries
-    6. Store FinancialRun record
-    7. Advance job state
+    Always computes a baseline. For each provider_id, finds the matching HPFC
+    snapshot and computes independently. Missing HPFCs produce an error entry
+    instead of aborting.
     """
-    # 1. Validate job
     job = await job_repo.get_job_by_id(session, job_id)
     if job is None:
         raise FinancialError(f"Job {job_id} not found")
@@ -62,7 +181,7 @@ async def run_financial(
     try:
         meter_id = job.meter_id or str(job_id)
 
-        # 2. Fetch forecast run + series
+        # Fetch forecast data (once for all providers)
         forecast_run = await forecast_run_repo.get_by_job_id(session, job_id)
         if forecast_run is None:
             raise FinancialError(f"No forecast run found for job {job_id}")
@@ -73,122 +192,90 @@ async def run_financial(
         if fc_total == 0:
             raise FinancialError(f"No forecast series found for job {job_id}")
 
-        # 3. Find HPFC snapshot
+        horizon_start = forecast_run.horizon_start
+        horizon_end = forecast_run.horizon_end
+        results: list[dict] = []
+
+        # --- Baseline (always) ---
         if snapshot_id is not None:
-            snapshot = await hpfc_snapshot_repo.get_by_id(session, snapshot_id)
-            if snapshot is None:
+            baseline_snapshot = await hpfc_snapshot_repo.get_by_id(session, snapshot_id)
+            if baseline_snapshot is None:
                 raise FinancialError(f"HPFC snapshot {snapshot_id} not found")
         else:
-            # Auto-find: latest snapshot covering the forecast horizon
-            snapshot = await hpfc_snapshot_repo.get_latest_covering(
-                session, forecast_run.horizon_start, forecast_run.horizon_end
+            baseline_snapshot = await hpfc_snapshot_repo.get_latest_covering(
+                session, horizon_start, horizon_end
             )
-            if snapshot is None:
-                raise FinancialError(
-                    f"No HPFC snapshot covers forecast horizon "
-                    f"{forecast_run.horizon_start} – {forecast_run.horizon_end}"
+
+        if baseline_snapshot is not None:
+            try:
+                r = await _calc_single(
+                    session,
+                    job_id=job_id,
+                    forecast_run_id=forecast_run.id,
+                    meter_id=meter_id,
+                    provider_id="baseline",
+                    snapshot=baseline_snapshot,
+                    fc_rows=fc_rows,
                 )
-
-        # 4. Load HPFC series
-        hpfc_rows = await hpfc_series_repo.get_all_by_snapshot_id(session, snapshot.id)
-        if not hpfc_rows:
-            raise FinancialError(f"HPFC snapshot {snapshot.id} has no series data")
-
-        # Build price lookup: ts_utc → price_mwh (hourly)
-        price_map: dict[datetime, float] = {
-            r.ts_utc.replace(tzinfo=None) if r.ts_utc.tzinfo else r.ts_utc: r.price_mwh
-            for r in hpfc_rows
-        }
-
-        # 5. Create FinancialRun record
-        fin_run = FinancialRun(
-            id=uuid.uuid4(),
-            job_id=job_id,
-            forecast_run_id=forecast_run.id,
-            hpfc_snapshot_id=snapshot.id,
-            meter_id=meter_id,
-            status="running",
-        )
-        await financial_run_repo.create(session, fin_run)
-
-        # 6. Detect interval and compute costs
-        if len(fc_rows) >= 2:
-            delta = (fc_rows[1].ts_utc - fc_rows[0].ts_utc).total_seconds()
-            interval_minutes = max(int(delta / 60), 15)
+                results.append(r)
+            except FinancialError as exc:
+                results.append({
+                    "provider_id": "baseline",
+                    "status": "error",
+                    "error": str(exc),
+                })
         else:
-            interval_minutes = 15
-
-        hours_per_interval = interval_minutes / 60.0
-        cost_rows: list[dict] = []
-
-        for fr in fc_rows:
-            ts = fr.ts_utc
-            ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
-
-            # Look up HPFC price — try exact match, then truncate to hour
-            price = price_map.get(ts_naive)
-            if price is None:
-                ts_hour = ts_naive.replace(minute=0, second=0, microsecond=0)
-                price = price_map.get(ts_hour)
-
-            if price is None:
-                continue  # Skip intervals without price data
-
-            # y_hat is in kW → convert to kWh for the interval
-            consumption_kwh = fr.y_hat * hours_per_interval
-            # Cost = (consumption_kwh / 1000) * price_mwh
-            cost_eur = (consumption_kwh / 1000.0) * price
-
-            cost_rows.append({
-                "ts_utc": ts,
-                "consumption_kwh": consumption_kwh,
-                "price_mwh": price,
-                "cost_eur": cost_eur,
+            results.append({
+                "provider_id": "baseline",
+                "status": "error",
+                "error": (
+                    f"Keine HPFC im Zeitraum "
+                    f"{horizon_start} bis {horizon_end}"
+                ),
             })
 
-        if not cost_rows:
-            raise FinancialError("No overlapping timestamps between forecast and HPFC")
+        # --- Per-provider ---
+        for pid in (provider_ids or []):
+            snap = await hpfc_snapshot_repo.get_latest_covering_by_provider(
+                session, pid, horizon_start, horizon_end
+            )
+            if snap is None:
+                results.append({
+                    "provider_id": pid,
+                    "status": "error",
+                    "error": (
+                        f"Keine HPFC für Provider '{pid}' im Zeitraum "
+                        f"{horizon_start} bis {horizon_end}"
+                    ),
+                })
+                continue
 
-        # 7. Aggregate totals and monthly summaries
-        total_cost = sum(r["cost_eur"] for r in cost_rows)
+            try:
+                r = await _calc_single(
+                    session,
+                    job_id=job_id,
+                    forecast_run_id=forecast_run.id,
+                    meter_id=meter_id,
+                    provider_id=pid,
+                    snapshot=snap,
+                    fc_rows=fc_rows,
+                )
+                results.append(r)
+            except FinancialError as exc:
+                results.append({
+                    "provider_id": pid,
+                    "status": "error",
+                    "error": str(exc),
+                })
 
-        monthly: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "kwh": 0.0, "prices": []})
-        for r in cost_rows:
-            ts = r["ts_utc"]
-            month_key = ts.strftime("%Y-%m") if hasattr(ts, "strftime") else str(ts)[:7]
-            monthly[month_key]["cost"] += r["cost_eur"]
-            monthly[month_key]["kwh"] += r["consumption_kwh"]
-            monthly[month_key]["prices"].append(r["price_mwh"])
-
-        monthly_summary = [
-            {
-                "month": k,
-                "total_cost_eur": round(v["cost"], 4),
-                "total_kwh": round(v["kwh"], 4),
-                "avg_price_mwh": round(float(np.mean(v["prices"])), 4),
-            }
-            for k, v in sorted(monthly.items())
-        ]
-
-        # 8. Update FinancialRun
-        fin_run.status = "ok"
-        fin_run.total_cost_eur = round(total_cost, 4)
-        fin_run.monthly_summary = monthly_summary
-        fin_run.completed_at = datetime.now(timezone.utc)
-        await session.flush()
-
-        # 9. Advance job to done
+        # Advance job to done
         job.status = JobStatus.DONE
         job.current_phase = None
         await session.flush()
 
         return {
-            "calc_id": str(fin_run.id),
             "job_id": str(job_id),
-            "total_cost_eur": fin_run.total_cost_eur,
-            "monthly_summary": monthly_summary,
-            "cost_rows": cost_rows,
-            "matched_intervals": len(cost_rows),
+            "results": results,
             "total_forecast_rows": fc_total,
         }
 
@@ -199,28 +286,105 @@ async def run_financial(
         job.error_message = f"Financial error: {exc}"
         job.current_phase = None
         await session.flush()
-        try:
-            if fin_run:
-                fin_run.status = "failed"
-                fin_run.completed_at = datetime.now(timezone.utc)
-                await session.flush()
-        except Exception:
-            pass
         raise FinancialError(f"Financial calculation failed: {exc}") from exc
+
+
+async def run_financial(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    *,
+    snapshot_id: uuid.UUID | None = None,
+    provider_ids: list[str] | None = None,
+) -> dict:
+    """Backwards-compatible single-run entrypoint.
+
+    Delegates to run_financial_multi and returns flat result for the first
+    successful calculation (baseline).
+    """
+    multi = await run_financial_multi(
+        session, job_id, provider_ids=provider_ids, snapshot_id=snapshot_id
+    )
+
+    # Find first ok result for backward compat
+    for r in multi["results"]:
+        if r["status"] == "ok":
+            return {
+                "calc_id": r["calc_id"],
+                "job_id": multi["job_id"],
+                "total_cost_eur": r["total_cost_eur"],
+                "monthly_summary": r["monthly_summary"],
+                "cost_rows": [],  # not stored in multi result
+                "matched_intervals": r.get("matched_intervals", 0),
+                "total_forecast_rows": multi["total_forecast_rows"],
+            }
+
+    # All failed — raise with baseline error
+    baseline_err = next(
+        (r["error"] for r in multi["results"] if r["provider_id"] == "baseline"),
+        "Financial calculation failed for all providers",
+    )
+    raise FinancialError(baseline_err)
+
+
+# ---------------------------------------------------------------------------
+# Result retrieval
+# ---------------------------------------------------------------------------
+
+async def get_financial_results(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+) -> dict:
+    """Get all financial calculation results for a job (multi-provider)."""
+    job = await job_repo.get_job_by_id(session, job_id)
+    if job is None:
+        raise FinancialError(f"Job {job_id} not found")
+
+    fin_runs = await financial_run_repo.list_by_job_id(session, job_id)
+    if not fin_runs:
+        raise FinancialError(f"No financial results for job {job_id}")
+
+    results: list[dict] = []
+    for fr in fin_runs:
+        results.append({
+            "provider_id": fr.provider_id,
+            "calc_id": str(fr.id),
+            "status": fr.status,
+            "total_cost_eur": fr.total_cost_eur,
+            "monthly_summary": fr.monthly_summary or [],
+        })
+
+    return {
+        "job_id": str(job_id),
+        "results": results,
+    }
 
 
 async def get_financial_result(
     session: AsyncSession,
     job_id: uuid.UUID,
+    *,
+    provider_id: str | None = None,
 ) -> dict:
-    """Get the financial calculation result for a job."""
+    """Get a single financial calculation result for a job.
+
+    If provider_id is given, returns that provider's result.
+    Otherwise returns the most recent (backward compat).
+    """
     job = await job_repo.get_job_by_id(session, job_id)
     if job is None:
         raise FinancialError(f"Job {job_id} not found")
 
-    fin_run = await financial_run_repo.get_by_job_id(session, job_id)
-    if fin_run is None:
-        raise FinancialError(f"No financial result for job {job_id}")
+    if provider_id is not None:
+        fin_runs = await financial_run_repo.list_by_job_id(session, job_id)
+        fin_run = next((r for r in fin_runs if r.provider_id == provider_id), None)
+        if fin_run is None:
+            raise FinancialError(
+                f"No financial result for provider '{provider_id}' on job {job_id}"
+            )
+    else:
+        fin_run = await financial_run_repo.get_by_job_id(session, job_id)
+        if fin_run is None:
+            raise FinancialError(f"No financial result for job {job_id}")
 
     # Re-compute cost rows from forecast + HPFC for the response
     forecast_run = await forecast_run_repo.get_by_job_id(session, job_id)
@@ -254,7 +418,6 @@ async def get_financial_result(
         if price is None:
             ts_hour = ts_naive.replace(minute=0, second=0, microsecond=0)
             price = price_map.get(ts_hour)
-
         if price is None:
             continue
 
@@ -271,23 +434,29 @@ async def get_financial_result(
     return {
         "calc_id": str(fin_run.id),
         "job_id": str(job_id),
+        "provider_id": fin_run.provider_id,
         "total_cost_eur": fin_run.total_cost_eur,
         "monthly_summary": fin_run.monthly_summary or [],
         "rows": cost_rows,
     }
 
 
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
 async def export_financial(
     session: AsyncSession,
     job_id: uuid.UUID,
     *,
     fmt: str = "csv",
+    provider_id: str | None = None,
 ) -> tuple[bytes, str, str]:
     """Export financial results as CSV or XLSX.
 
     Returns (file_bytes, content_type, filename).
     """
-    result = await get_financial_result(session, job_id)
+    result = await get_financial_result(session, job_id, provider_id=provider_id)
 
     if fmt == "xlsx":
         return _export_xlsx(result, job_id)
@@ -308,8 +477,6 @@ def _fmt_de(v: float | int | None) -> str:
 
 def _export_csv(result: dict, job_id: uuid.UUID) -> tuple[bytes, str, str]:
     """Generate CSV export (German format: semicolon delimiter, decimal comma)."""
-    import io
-
     lines: list[str] = []
 
     # Header

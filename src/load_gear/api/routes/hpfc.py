@@ -14,7 +14,9 @@ from load_gear.models.schemas import (
     HpfcSnapshotListResponse,
     HpfcSnapshotResponse,
     HpfcUploadResponse,
+    ProviderListResponse,
 )
+from load_gear.repositories import hpfc_snapshot_repo
 from load_gear.services.financial.hpfc_service import (
     HpfcError,
     delete_snapshot_cascade,
@@ -70,6 +72,15 @@ async def list_hpfc_snapshots(
         for s in snapshots
     ]
     return HpfcSnapshotListResponse(items=items, total=total)
+
+
+@router.get("/providers", response_model=ProviderListResponse)
+async def list_providers(
+    session: AsyncSession = Depends(get_session),
+) -> ProviderListResponse:
+    """List all distinct HPFC provider IDs."""
+    providers = await hpfc_snapshot_repo.list_providers(session)
+    return ProviderListResponse(providers=providers)
 
 
 @router.get("/{snapshot_id}", response_model=HpfcSnapshotResponse)

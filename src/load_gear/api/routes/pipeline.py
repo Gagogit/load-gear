@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,7 @@ async def pipeline_run(
     prognosis_from: str = Form(""),
     prognosis_to: str = Form(""),
     growth_pct: float = Form(100.0),
+    provider_ids: str = Form(""),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -59,6 +60,11 @@ async def pipeline_run(
     file_content = await file.read()
     file_name = file.filename or "upload.csv"
 
+    # Parse provider_ids from comma-separated string
+    parsed_provider_ids: list[str] | None = None
+    if provider_ids.strip():
+        parsed_provider_ids = [p.strip() for p in provider_ids.split(",") if p.strip()]
+
     result = await run_pipeline(
         session,
         project_name=project_name,
@@ -68,6 +74,7 @@ async def pipeline_run(
         prognosis_from=p_from,
         prognosis_to=p_to,
         growth_pct=growth_pct,
+        provider_ids=parsed_provider_ids,
         file_content=file_content,
         file_name=file_name,
     )

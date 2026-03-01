@@ -207,6 +207,7 @@ class FinancialRun(Base):
         UUID(as_uuid=True), ForeignKey("data.hpfc_snapshots.id"), nullable=False
     )
     meter_id: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_id: Mapped[str] = mapped_column(String(100), nullable=False, default="baseline")
     status: Mapped[str] = mapped_column(String(20), default="running", nullable=False)
     total_cost_eur: Mapped[float | None] = mapped_column(Double)
     monthly_summary: Mapped[dict | None] = mapped_column(JSONB)

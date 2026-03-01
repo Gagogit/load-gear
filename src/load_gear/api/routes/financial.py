@@ -14,7 +14,8 @@ from load_gear.services.financial.financial_service import (
     FinancialError,
     export_financial,
     get_financial_result,
-    run_financial,
+    get_financial_results,
+    run_financial_multi,
 )
 
 router = APIRouter(prefix="/api/v1/financial", tags=["financial"])
@@ -25,22 +26,19 @@ async def calculate_financial(
     body: FinancialCalcRequest,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Trigger financial calculation for a job in financial_running state."""
+    """Trigger financial calculation for a job in financial_running state.
+
+    Supports multi-provider: pass provider_ids to calculate for multiple HPFC providers.
+    Baseline is always calculated.
+    """
     try:
-        result = await run_financial(
+        result = await run_financial_multi(
             session,
             body.job_id,
             snapshot_id=body.snapshot_id,
+            provider_ids=body.provider_ids,
         )
-        # Return summary (without full cost_rows for brevity)
-        return {
-            "calc_id": result["calc_id"],
-            "job_id": result["job_id"],
-            "total_cost_eur": result["total_cost_eur"],
-            "matched_intervals": result["matched_intervals"],
-            "total_forecast_rows": result["total_forecast_rows"],
-            "monthly_summary": result["monthly_summary"],
-        }
+        return result
     except FinancialError as exc:
         error_msg = str(exc)
         if "not found" in error_msg:
@@ -55,9 +53,26 @@ async def financial_result(
     job_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Get financial calculation result with cost time series and monthly summaries."""
+    """Get all financial calculation results (multi-provider)."""
     try:
-        result = await get_financial_result(session, job_id)
+        result = await get_financial_results(session, job_id)
+        return result
+    except FinancialError as exc:
+        error_msg = str(exc)
+        if "not found" in error_msg or "No financial" in error_msg:
+            raise HTTPException(status_code=404, detail=error_msg) from exc
+        raise HTTPException(status_code=422, detail=error_msg) from exc
+
+
+@router.get("/{job_id}/result/{provider_id}")
+async def financial_result_by_provider(
+    job_id: uuid.UUID,
+    provider_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Get financial calculation result for a specific provider."""
+    try:
+        result = await get_financial_result(session, job_id, provider_id=provider_id)
         return result
     except FinancialError as exc:
         error_msg = str(exc)
@@ -70,12 +85,13 @@ async def financial_result(
 async def financial_export(
     job_id: uuid.UUID,
     format: str = Query("csv", description="Export format: csv or xlsx"),
+    provider_id: str | None = Query(None, description="Provider ID (default: most recent)"),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Export financial results as CSV or XLSX file."""
     try:
         content, content_type, filename = await export_financial(
-            session, job_id, fmt=format
+            session, job_id, fmt=format, provider_id=provider_id
         )
         return Response(
             content=content,

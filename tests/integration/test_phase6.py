@@ -134,27 +134,35 @@ async def test_full_financial_pipeline(client: AsyncClient) -> None:
     snapshot_id = hpfc_resp.json()["snapshot_id"]
     assert hpfc_resp.json()["rows_imported"] > 0
 
-    # Step 8: Financial calculation
+    # Step 8: Financial calculation (multi-provider response)
     fin_resp = await client.post("/api/v1/financial/calculate", json={
         "job_id": job_id,
         "snapshot_id": snapshot_id,
     })
     assert fin_resp.status_code == 202
     fin_data = fin_resp.json()
-    assert fin_data["total_cost_eur"] > 0
-    assert fin_data["matched_intervals"] > 0
-    assert len(fin_data["monthly_summary"]) >= 1
+    assert "results" in fin_data
+    baseline = fin_data["results"][0]
+    assert baseline["status"] == "ok"
+    assert baseline["total_cost_eur"] > 0
 
-    # Step 9: Verify result endpoint
+    # Step 9: Verify result endpoint (multi-provider)
     result_resp = await client.get(f"/api/v1/financial/{job_id}/result")
     assert result_resp.status_code == 200
     result_data = result_resp.json()
-    assert result_data["total_cost_eur"] > 0
-    assert len(result_data["rows"]) > 0
-    assert len(result_data["monthly_summary"]) >= 1
+    assert len(result_data["results"]) >= 1
+    assert result_data["results"][0]["total_cost_eur"] > 0
+
+    # Verify per-provider detail endpoint
+    detail_resp = await client.get(f"/api/v1/financial/{job_id}/result/baseline")
+    assert detail_resp.status_code == 200
+    detail_data = detail_resp.json()
+    assert detail_data["total_cost_eur"] > 0
+    assert len(detail_data["rows"]) > 0
+    assert len(detail_data["monthly_summary"]) >= 1
 
     # Verify cost row structure
-    for row in result_data["rows"][:5]:
+    for row in detail_data["rows"][:5]:
         assert row["consumption_kwh"] > 0
         assert row["price_mwh"] > 0
         assert row["cost_eur"] > 0

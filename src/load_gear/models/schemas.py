@@ -454,6 +454,7 @@ class FinancialCalcRequest(BaseModel):
 
     job_id: uuid.UUID
     snapshot_id: uuid.UUID | None = Field(None, description="Specific HPFC snapshot (auto if None)")
+    provider_ids: list[str] | None = Field(None, description="Provider IDs for multi-provider calculation")
 
 
 class CostRowResponse(BaseModel):
@@ -475,13 +476,38 @@ class MonthlySummaryEntry(BaseModel):
 
 
 class FinancialResultResponse(BaseModel):
-    """GET /api/v1/financial/{job_id}/result response."""
+    """GET /api/v1/financial/{job_id}/result response (single provider)."""
 
     calc_id: uuid.UUID
     job_id: uuid.UUID
+    provider_id: str = "baseline"
     total_cost_eur: float
     monthly_summary: list[MonthlySummaryEntry]
     rows: list[CostRowResponse]
+
+
+class ProviderFinancialResult(BaseModel):
+    """Single provider result in multi-provider response."""
+
+    provider_id: str
+    calc_id: uuid.UUID | None = None
+    status: str  # "ok" | "error"
+    error: str | None = None
+    total_cost_eur: float | None = None
+    monthly_summary: list[MonthlySummaryEntry] | None = None
+
+
+class FinancialMultiResultResponse(BaseModel):
+    """GET /api/v1/financial/{job_id}/result — all providers."""
+
+    job_id: uuid.UUID
+    results: list[ProviderFinancialResult]
+
+
+class ProviderListResponse(BaseModel):
+    """GET /api/v1/hpfc/providers response."""
+
+    providers: list[str]
 
 
 # --- Weather schemas (P7) ---

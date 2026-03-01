@@ -33,6 +33,21 @@ async def get_by_job_id(session: AsyncSession, job_id: uuid.UUID) -> FinancialRu
     return result.scalar_one_or_none()
 
 
+async def get_latest_by_job_id(session: AsyncSession, job_id: uuid.UUID) -> FinancialRun | None:
+    """Alias for get_by_job_id — get the most recent financial run for a job."""
+    return await get_by_job_id(session, job_id)
+
+
+async def list_by_job_id(session: AsyncSession, job_id: uuid.UUID) -> list[FinancialRun]:
+    """Get all financial runs for a job (multi-provider)."""
+    result = await session.execute(
+        select(FinancialRun)
+        .where(FinancialRun.job_id == job_id)
+        .order_by(FinancialRun.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def update_status(
     session: AsyncSession,
     run: FinancialRun,

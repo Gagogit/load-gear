@@ -58,6 +58,34 @@ async def get_latest_covering(
     return result.scalar_one_or_none()
 
 
+async def get_latest_covering_by_provider(
+    session: AsyncSession,
+    provider_id: str,
+    start: object,
+    end: object,
+) -> HpfcSnapshot | None:
+    """Find the most recent snapshot for a specific provider covering [start, end]."""
+    result = await session.execute(
+        select(HpfcSnapshot)
+        .where(HpfcSnapshot.provider_id == provider_id)
+        .where(HpfcSnapshot.delivery_start <= start)
+        .where(HpfcSnapshot.delivery_end >= end)
+        .order_by(HpfcSnapshot.snapshot_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_providers(session: AsyncSession) -> list[str]:
+    """Return all distinct provider_ids."""
+    result = await session.execute(
+        select(HpfcSnapshot.provider_id)
+        .distinct()
+        .order_by(HpfcSnapshot.provider_id)
+    )
+    return list(result.scalars().all())
+
+
 async def delete_snapshot(session: AsyncSession, snapshot: HpfcSnapshot) -> None:
     """Delete an HPFC snapshot."""
     await session.delete(snapshot)

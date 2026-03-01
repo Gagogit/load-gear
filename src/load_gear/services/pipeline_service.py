@@ -23,7 +23,7 @@ from load_gear.services.ingest.ingest_service import IngestError, run_ingest
 from load_gear.services.qa.qa_service import QAError, run_qa
 from load_gear.services.analysis.analysis_service import AnalysisError, run_analysis
 from load_gear.services.forecast.forecast_service import ForecastError, run_forecast
-from load_gear.services.financial.financial_service import FinancialError, run_financial
+from load_gear.services.financial.financial_service import FinancialError, run_financial, run_financial_multi
 from load_gear.services.job_service import validate_transition
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ async def run_pipeline(
     prognosis_from: datetime | None,
     prognosis_to: datetime | None,
     growth_pct: float = 100.0,
+    provider_ids: list[str] | None = None,
     file_content: bytes | None = None,
     file_name: str = "upload.csv",
 ) -> dict:
@@ -127,7 +128,7 @@ async def run_pipeline(
         # 7. Financial (if Aggregation task pushes to financial_running)
         if job.status == JobStatus.FINANCIAL_RUNNING:
             try:
-                await run_financial(session, job_id)
+                await run_financial_multi(session, job_id, provider_ids=provider_ids)
             except FinancialError as exc:
                 # Financial may fail if no HPFC snapshot — still advance to done
                 logger.warning(f"Financial step skipped: {exc}")

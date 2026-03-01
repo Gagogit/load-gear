@@ -71,7 +71,7 @@ label {
   color: var(--text-muted);
   font-weight: 500;
 }
-input[type="text"], input[type="date"], input[type="number"] {
+input[type="text"], input[type="date"], input[type="number"], select {
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -80,6 +80,12 @@ input[type="text"], input[type="date"], input[type="number"] {
   font-size: 0.9rem;
   outline: none;
   transition: border-color 0.2s;
+}
+select[multiple] {
+  min-height: 5rem;
+}
+select option {
+  padding: 0.3rem 0.5rem;
 }
 input:focus {
   border-color: var(--green);
@@ -193,6 +199,25 @@ button:disabled {
   color: var(--text-muted);
   margin-top: 0.5rem;
 }
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+.result-table th, .result-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.result-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+.result-table .status-ok { color: var(--green); }
+.result-table .status-error { color: var(--red); }
 </style>
 </head>
 <body>
@@ -230,6 +255,12 @@ button:disabled {
         <label for="growth_pct">Prozentwert</label>
         <input type="number" id="growth_pct" value="100" min="0" max="500" step="0.1">
       </div>
+      <div class="form-group">
+        <label for="provider_select">Anbieter (HPFC)</label>
+        <select id="provider_select" multiple title="Ctrl+Klick fuer Mehrfachauswahl">
+          <option value="" disabled>Wird geladen...</option>
+        </select>
+      </div>
       <div class="form-group full">
         <label>Datei (CSV)</label>
         <div class="drop-zone" id="drop_zone">
@@ -261,6 +292,16 @@ button:disabled {
       <div class="led-item"><div class="led-dot" id="led_10"></div><span class="led-label">10. Fertig zu Output</span></div>
     </div>
   </div>
+
+  <div class="card" id="result_card" style="display:none">
+    <h2>Ergebnisse (Anbietervergleich)</h2>
+    <table class="result-table">
+      <thead>
+        <tr><th>Anbieter</th><th>Status</th><th>Gesamtkosten (EUR)</th><th>Details</th></tr>
+      </thead>
+      <tbody id="result_tbody"></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -268,6 +309,34 @@ button:disabled {
   const $ = (id) => document.getElementById(id);
   let currentJobId = null;
   let pollTimer = null;
+
+  // Load providers for dropdown
+  async function loadProviders() {
+    try {
+      const resp = await fetch('/api/v1/hpfc/providers');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const sel = $('provider_select');
+      sel.innerHTML = '';
+      if (data.providers && data.providers.length) {
+        data.providers.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          sel.appendChild(opt);
+        });
+      } else {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.disabled = true;
+        opt.textContent = 'Keine Anbieter vorhanden';
+        sel.appendChild(opt);
+      }
+    } catch (err) {
+      // Ignore load errors
+    }
+  }
+  loadProviders();
 
   // Drag & drop
   const dropZone = $('drop_zone');
@@ -359,6 +428,7 @@ button:disabled {
     resetLeds();
     currentJobId = null;
     $('btn_download').disabled = true;
+    $('result_card').style.display = 'none';
 
     if (!fileInput.files.length) {
       showError('Bitte eine Datei auswaehlen.');
@@ -373,6 +443,9 @@ button:disabled {
     form.append('prognosis_from', $('prognosis_from').value);
     form.append('prognosis_to', $('prognosis_to').value);
     form.append('growth_pct', $('growth_pct').value);
+    // Collect selected providers
+    const selOpts = Array.from($('provider_select').selectedOptions).map(o => o.value).filter(Boolean);
+    form.append('provider_ids', selOpts.join(','));
     form.append('file', fileInput.files[0]);
 
     $('btn_upload').disabled = true;
@@ -409,6 +482,7 @@ button:disabled {
       } else if (data.status === 'done' || data.status === 'warn') {
         setStatus('Abgeschlossen');
         $('btn_download').disabled = false;
+        showFinancialResults();
       } else {
         // Start polling
         startPoll();
@@ -450,6 +524,7 @@ button:disabled {
         pollTimer = null;
         setStatus('Abgeschlossen');
         $('btn_download').disabled = false;
+        showFinancialResults();
       } else if (data.status === 'failed') {
         clearInterval(pollTimer);
         pollTimer = null;
@@ -459,6 +534,31 @@ button:disabled {
       }
     } catch (err) {
       // Ignore poll errors
+    }
+  }
+
+  // Show financial results table
+  async function showFinancialResults() {
+    if (!currentJobId) return;
+    try {
+      const resp = await fetch('/api/v1/financial/' + currentJobId + '/result');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (!data.results || !data.results.length) return;
+      const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const tbody = $('result_tbody');
+      tbody.innerHTML = '';
+      data.results.forEach(r => {
+        const tr = document.createElement('tr');
+        const cls = r.status === 'ok' ? 'status-ok' : 'status-error';
+        const cost = r.total_cost_eur != null ? r.total_cost_eur.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' EUR' : '-';
+        const detail = r.status === 'ok' ? (r.monthly_summary ? r.monthly_summary.length + ' Monate' : '') : esc(r.error || '');
+        tr.innerHTML = '<td>' + esc(r.provider_id) + '</td><td class="' + cls + '">' + esc(r.status) + '</td><td>' + cost + '</td><td>' + detail + '</td>';
+        tbody.appendChild(tr);
+      });
+      $('result_card').style.display = '';
+    } catch (err) {
+      // Ignore
     }
   }
 
