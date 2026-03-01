@@ -479,7 +479,7 @@ def _looks_like_date(s: str) -> bool:
 def _looks_like_time(s: str) -> bool:
     """Check if string looks like a time."""
     s = s.strip()
-    return bool(re.match(r"\d{1,2}:\d{2}(:\d{2})?", s))
+    return bool(re.match(r"\d{1,2}:\d{1,2}(:\d{1,2})?", s))
 
 
 def _looks_like_datetime(s: str) -> bool:

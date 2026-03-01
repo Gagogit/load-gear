@@ -949,3 +949,44 @@ def test_detect_two_digit_year_single_digit_hour() -> None:
     fmt, is_combined = detect_datetime_format(samples)
     assert fmt == "%d.%m.%y %H:%M"
     assert is_combined is True
+
+
+def test_detect_single_digit_minute() -> None:
+    """Single-digit minute (1:0) in combined datetime detected correctly."""
+    samples = ["01.01.2024 0:15", "01.01.2024 0:30", "01.01.2024 0:45",
+               "01.01.2024 1:0", "01.01.2024 1:15"]
+    fmt, is_combined = detect_datetime_format(samples)
+    assert fmt == "%d.%m.%Y %H:%M"
+    assert is_combined is True
+
+
+def test_detect_single_digit_minute_full_csv() -> None:
+    """Full CSV with single-digit minutes (1:0, 2:0) is detected correctly."""
+    csv = (
+        b"Zeitstempel;Wert (kWh)\n"
+        b"01.01.2024 0:15;12,5\n"
+        b"01.01.2024 0:30;13,2\n"
+        b"01.01.2024 0:45;11,8\n"
+        b"01.01.2024 1:0;12,1\n"
+        b"01.01.2024 1:15;10,9\n"
+        b"01.01.2024 1:30;11,4\n"
+        b"01.01.2024 1:45;10,2\n"
+        b"01.01.2024 2:0;9,8\n"
+    )
+    rules = detect_format(csv)
+    assert rules["date_format"] == "%d.%m.%Y %H:%M"
+    assert rules["time_format"] == ""
+
+
+def test_split_datetime_single_digit_minute() -> None:
+    """Colon heuristic splits '01.01.2024 1:0' correctly."""
+    result = _split_datetime_by_colon("01.01.2024 1:0")
+    assert result == ("01.01.2024", " ", "1:0")
+
+
+def test_detect_time_format_single_digit_minute() -> None:
+    """Time format detection handles single-digit minutes (1:0, 2:0)."""
+    from load_gear.services.ingest.detectors.datetime_format import detect_time_format
+    samples = ["0:15", "0:30", "1:0", "1:15", "2:0"]
+    fmt = detect_time_format(samples)
+    assert fmt == "%H:%M"

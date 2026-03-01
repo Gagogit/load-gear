@@ -24,30 +24,30 @@ DATE_FORMATS = [
 ]
 
 TIME_FORMATS = [
-    ("%H:%M", r"\d{1,2}:\d{2}"),                 # 24h: HH:MM or H:MM
-    ("%H:%M:%S", r"\d{1,2}:\d{2}:\d{2}"),        # 24h with seconds
-    ("%I:%M %p", r"\d{1,2}:\d{2}\s*[AaPp][Mm]"), # 12h AM/PM
+    ("%H:%M", r"\d{1,2}:\d{1,2}"),                 # 24h: H:M, H:MM, HH:MM
+    ("%H:%M:%S", r"\d{1,2}:\d{1,2}:\d{1,2}"),      # 24h with seconds
+    ("%I:%M %p", r"\d{1,2}:\d{1,2}\s*[AaPp][Mm]"), # 12h AM/PM
 ]
 
 # Combined datetime patterns (single column)
 DATETIME_FORMATS = [
     # With seconds (check before without-seconds to avoid partial match)
-    ("%Y-%m-%d %H:%M:%S", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}:\d{2}"),
-    ("%Y-%m-%dT%H:%M:%S", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}:\d{2}"),
-    ("%d.%m.%Y %H:%M:%S", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}:\d{2}"),
-    ("%d.%m.%Y:%H:%M:%S", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{2}:\d{2}"), # colon with seconds
+    ("%Y-%m-%d %H:%M:%S", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{1,2}:\d{1,2}"),
+    ("%Y-%m-%dT%H:%M:%S", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{1,2}:\d{1,2}"),
+    ("%d.%m.%Y %H:%M:%S", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{1,2}:\d{1,2}"),
+    ("%d.%m.%Y:%H:%M:%S", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{1,2}:\d{1,2}"),
     # Without seconds
-    ("%Y-%m-%d %H:%M", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}$"),
-    ("%Y-%m-%dT%H:%M", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$"),
-    ("%d.%m.%Y %H:%M", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2}$"),
-    ("%d.%m.%Y:%H:%M", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{2}$"),          # colon separator
-    ("%d.%m.%y %H:%M", r"\d{2}\.\d{2}\.\d{2}\s+\d{1,2}:\d{2}$"),        # 2-digit year + time
-    ("%d.%m.%y:%H:%M", r"\d{2}\.\d{2}\.\d{2}:\d{1,2}:\d{2}$"),          # 2-digit year + colon
+    ("%Y-%m-%d %H:%M", r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{1,2}$"),
+    ("%Y-%m-%dT%H:%M", r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{1,2}$"),
+    ("%d.%m.%Y %H:%M", r"\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{1,2}$"),
+    ("%d.%m.%Y:%H:%M", r"\d{2}\.\d{2}\.\d{4}:\d{1,2}:\d{1,2}$"),
+    ("%d.%m.%y %H:%M", r"\d{2}\.\d{2}\.\d{2}\s+\d{1,2}:\d{1,2}$"),
+    ("%d.%m.%y:%H:%M", r"\d{2}\.\d{2}\.\d{2}:\d{1,2}:\d{1,2}$"),
 ]
 
 # Regex to find a time tail at the end of a string.
 # (?<!\d) prevents matching inside a year (e.g. "2024" in "2024:0:15").
-_TIME_TAIL_RE = re.compile(r"(?<!\d)(\d{1,2}:\d{2}(?::\d{2})?)$")
+_TIME_TAIL_RE = re.compile(r"(?<!\d)(\d{1,2}:\d{1,2}(?::\d{1,2})?)$")
 
 
 def detect_date_format(samples: list[str]) -> str:
