@@ -63,6 +63,7 @@ class Job(Base):
     payload: Mapped[dict | None] = mapped_column(JSONB)
     current_phase: Mapped[str | None] = mapped_column(String(20))
     error_message: Mapped[str | None] = mapped_column(Text)
+    error_context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

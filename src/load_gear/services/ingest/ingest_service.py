@@ -138,15 +138,17 @@ async def run_ingest(
 
     except (ParseError, NormalizationError) as exc:
         # Pipeline failure — set job to failed
+        ctx = getattr(exc, "context", None) or {}
         job.status = JobStatus.FAILED
         job.error_message = str(exc)
+        job.error_context = ctx if ctx else None
         job.current_phase = None
         await session.flush()
-        ctx = getattr(exc, "context", None) or {}
         raise IngestError(str(exc), context=ctx) from exc
     except Exception as exc:
         job.status = JobStatus.FAILED
         job.error_message = f"Unexpected ingest error: {exc}"
+        job.error_context = {"hint": "Unerwarteter Fehler — bitte Support kontaktieren"}
         job.current_phase = None
         await session.flush()
         raise IngestError(f"Unexpected ingest error: {exc}") from exc

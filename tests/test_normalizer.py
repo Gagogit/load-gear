@@ -285,6 +285,47 @@ def test_normalize_two_digit_year() -> None:
     assert rows[0]["ts_utc"].year == 2024 or rows[0]["ts_utc"].year == 2025  # UTC may shift day
 
 
+def test_normalize_empty_file_has_context() -> None:
+    """NormalizationError for empty file includes context with hint."""
+    csv = b"Datum;Uhrzeit;Wert (kWh)\n"
+    job_id, file_id = _make_ids()
+
+    with pytest.raises(NormalizationError) as exc_info:
+        normalize(csv, GERMAN_RULES, meter_id="CTX", job_id=job_id, source_file_id=file_id)
+    assert exc_info.value.context
+    assert "hint" in exc_info.value.context
+
+
+def test_normalize_bad_encoding_has_context() -> None:
+    """NormalizationError for bad encoding includes hint in context."""
+    csv = b"\x80\x81\x82\x83"
+    job_id, file_id = _make_ids()
+    rules = {**GERMAN_RULES, "encoding": "utf-8"}
+
+    with pytest.raises(NormalizationError) as exc_info:
+        normalize(csv, rules, meter_id="ENC", job_id=job_id, source_file_id=file_id)
+    assert exc_info.value.context
+    assert "hint" in exc_info.value.context
+
+
+def test_normalize_unsupported_ts_config_has_context() -> None:
+    """NormalizationError for unsupported timestamp config includes columns in context."""
+    csv = b"Datum;Uhrzeit;Extra;Wert (kWh)\n01.01.2025;00:00;12:00;12,5\n"
+    job_id, file_id = _make_ids()
+    rules = {
+        **GERMAN_RULES,
+        "timestamp_columns": ["Datum", "Uhrzeit", "Extra"],
+        "time_format": "%H:%M",
+    }
+
+    with pytest.raises(NormalizationError) as exc_info:
+        normalize(csv, rules, meter_id="TS3", job_id=job_id, source_file_id=file_id)
+    ctx = exc_info.value.context
+    assert ctx
+    # Either wrapped by _build_timestamps (column key) or direct (timestamp_columns key)
+    assert "column" in ctx or "timestamp_columns" in ctx
+
+
 def test_normalize_colon_datetime() -> None:
     """CSV with dd.mm.yyyy:hh:mm combined timestamp normalizes correctly."""
     csv = (

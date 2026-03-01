@@ -813,3 +813,68 @@ def test_map_columns_ertrag() -> None:
     ]
     ts_cols, val_col, _, _ = _map_columns(columns, data_rows)
     assert val_col == "Ertrag"
+
+
+# --- ValueError wrapping → ParseError with context ---
+
+
+def test_unrecognized_date_format_raises_parse_error_with_context() -> None:
+    """Unrecognized date format raises ParseError (not ValueError) with structured context."""
+    csv = (
+        b"Datum;Uhrzeit;Wert (kWh)\n"
+        b"2025/01/01;00:00;12,5\n"
+        b"2025/01/02;00:15;13,2\n"
+        b"2025/01/03;00:30;11,8\n"
+        b"2025/01/04;00:45;12,1\n"
+        b"2025/01/05;01:00;10,9\n"
+        b"2025/01/06;01:15;11,4\n"
+        b"2025/01/07;01:30;10,2\n"
+        b"2025/01/08;01:45;9,8\n"
+    )
+    with pytest.raises(ParseError) as exc_info:
+        detect_format(csv)
+    ctx = exc_info.value.context
+    assert "columns" in ctx
+    assert "sample_values" in ctx
+    assert "hint" in ctx
+    assert len(ctx["sample_values"]) > 0
+
+
+def test_unrecognized_time_format_raises_parse_error_with_context() -> None:
+    """Unrecognized time format raises ParseError (not ValueError) with structured context."""
+    csv = (
+        b"Datum;Uhrzeit;Wert (kWh)\n"
+        b"01.01.2025;00h00;12,5\n"
+        b"01.01.2025;00h15;13,2\n"
+        b"01.01.2025;00h30;11,8\n"
+        b"01.01.2025;00h45;12,1\n"
+        b"01.01.2025;01h00;10,9\n"
+        b"01.01.2025;01h15;11,4\n"
+        b"01.01.2025;01h30;10,2\n"
+        b"01.01.2025;01h45;9,8\n"
+    )
+    with pytest.raises(ParseError) as exc_info:
+        detect_format(csv)
+    ctx = exc_info.value.context
+    assert "columns" in ctx
+    assert "sample_values" in ctx
+    assert "hint" in ctx
+
+
+def test_too_few_rows_has_context() -> None:
+    """File with fewer than 2 rows includes total_rows in context."""
+    with pytest.raises(ParseError) as exc_info:
+        detect_format(b"just one line\n")
+    ctx = exc_info.value.context
+    assert "total_rows" in ctx
+
+
+def test_no_data_rows_after_header_has_context() -> None:
+    """No data rows after header includes columns in context."""
+    # Build a CSV where header is found but data rows are empty
+    csv = b"Datum;Uhrzeit;Wert (kWh)\n"
+    # This will trigger "fewer than 2 rows" since we only have the header
+    with pytest.raises(ParseError) as exc_info:
+        detect_format(csv)
+    # Should have total_rows context
+    assert exc_info.value.context

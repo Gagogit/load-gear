@@ -202,7 +202,10 @@ def detect_format(raw_bytes: bytes) -> dict:
                 text = raw_bytes.decode("utf-8", errors="replace")
                 encoding = "utf-8"
             except Exception as exc:
-                raise ParseError("Cannot decode file with any supported encoding") from exc
+                raise ParseError(
+                    "Cannot decode file with any supported encoding",
+                    context={"hint": "Unterstützt: UTF-8, Latin-1, CP1252"},
+                ) from exc
 
         if text.startswith("\ufeff"):
             text = text[1:]
@@ -211,7 +214,10 @@ def detect_format(raw_bytes: bytes) -> dict:
         rows, line_numbers = _csv_to_rows(text, delimiter)
 
     if len(rows) < 2:
-        raise ParseError("File has fewer than 2 rows (need header + at least 1 data row)")
+        raise ParseError(
+            "File has fewer than 2 rows (need header + at least 1 data row)",
+            context={"total_rows": len(rows)},
+        )
 
     # Find header and data boundary (indices into filtered rows list)
     header_row_idx, data_start_idx = _find_data_boundary(rows)
@@ -222,27 +228,49 @@ def detect_format(raw_bytes: bytes) -> dict:
     header_row = line_numbers[header_row_idx] if header_row_idx < len(line_numbers) else 0
 
     if not data_rows:
-        raise ParseError("No data rows found after header")
+        raise ParseError(
+            "No data rows found after header",
+            context={"columns": columns},
+        )
 
     # Column mapping
     timestamp_cols, value_col, is_combined_ts, col_unit = _map_columns(columns, data_rows)
 
     # Date/time format detection
+    _fmt_hint = "Erwartete Formate: DD.MM.YYYY, YYYY-MM-DD, DD/MM/YYYY, HH:MM, HH:MM:SS"
     if is_combined_ts:
         ts_idx = columns.index(timestamp_cols[0])
         ts_samples = _get_column_samples_from_rows(data_rows, ts_idx)
-        dt_format, _ = detect_datetime_format(ts_samples)
+        try:
+            dt_format, _ = detect_datetime_format(ts_samples)
+        except ValueError as exc:
+            raise ParseError(
+                str(exc),
+                context={"columns": columns, "sample_values": ts_samples[:5], "hint": _fmt_hint},
+            ) from exc
         date_format = dt_format
         time_format = ""
     else:
         date_idx = columns.index(timestamp_cols[0])
         date_samples = _get_column_samples_from_rows(data_rows, date_idx)
-        date_format = detect_date_format(date_samples)
+        try:
+            date_format = detect_date_format(date_samples)
+        except ValueError as exc:
+            raise ParseError(
+                str(exc),
+                context={"columns": columns, "sample_values": date_samples[:5], "hint": _fmt_hint},
+            ) from exc
 
         if len(timestamp_cols) > 1:
             time_idx = columns.index(timestamp_cols[1])
             time_samples = _get_column_samples_from_rows(data_rows, time_idx)
-            time_format = detect_time_format(time_samples)
+            try:
+                time_format = detect_time_format(time_samples)
+            except ValueError as exc:
+                raise ParseError(
+                    str(exc),
+                    context={"columns": columns, "sample_values": time_samples[:5], "hint": _fmt_hint},
+                ) from exc
         else:
             time_format = ""
 

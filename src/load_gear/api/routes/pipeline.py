@@ -89,6 +89,7 @@ async def pipeline_status(
         job_id=job_id,
         status=job.status.value,
         error_message=job.error_message,
+        error_context=job.error_context,
         leds=leds,
     )
 

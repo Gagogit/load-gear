@@ -558,4 +558,5 @@ class PipelineStatusResponse(BaseModel):
     job_id: uuid.UUID
     status: str
     error_message: str | None = None
+    error_context: dict | None = None
     leds: dict[str, bool]

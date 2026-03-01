@@ -56,7 +56,10 @@ def normalize(
 
     total_rows = len(df)
     if total_rows == 0:
-        raise NormalizationError("File contains no data rows")
+        raise NormalizationError(
+            "File contains no data rows",
+            context={"hint": "Die Datei enthält keine Datenzeilen nach dem Header"},
+        )
 
     warnings: list[str] = []
 
@@ -157,7 +160,10 @@ def _read_csv(raw_bytes: bytes, rules: dict) -> pl.DataFrame:
     try:
         text = raw_bytes.decode(encoding)
     except (UnicodeDecodeError, LookupError) as exc:
-        raise NormalizationError(f"Cannot decode file with encoding {encoding}: {exc}") from exc
+        raise NormalizationError(
+            f"Cannot decode file with encoding {encoding}: {exc}",
+            context={"hint": "Unterstützt: UTF-8, Latin-1, CP1252"},
+        ) from exc
 
     if text.startswith("\ufeff"):
         text = text[1:]
@@ -174,7 +180,10 @@ def _read_csv(raw_bytes: bytes, rules: dict) -> pl.DataFrame:
             infer_schema_length=0,
         )
     except Exception as exc:
-        raise NormalizationError(f"Polars CSV parsing failed: {exc}") from exc
+        raise NormalizationError(
+            f"Polars CSV parsing failed: {exc}",
+            context={"hint": "CSV-Struktur konnte nicht gelesen werden — Delimiter oder Header prüfen"},
+        ) from exc
 
 
 def _read_excel(raw_bytes: bytes, file_type: str, header_row: int) -> pl.DataFrame:
@@ -200,7 +209,10 @@ def _read_excel(raw_bytes: bytes, file_type: str, header_row: int) -> pl.DataFra
             all_rows.append([str(ws.cell_value(rx, cx)) for cx in range(ws.ncols)])
 
     if len(all_rows) <= header_row:
-        raise NormalizationError("Excel file has fewer rows than expected header_row")
+        raise NormalizationError(
+            "Excel file has fewer rows than expected header_row",
+            context={"hint": f"Header erwartet in Zeile {header_row}, Datei hat nur {len(all_rows)} Zeilen"},
+        )
 
     columns = [c.strip() for c in all_rows[header_row]]
 
@@ -211,7 +223,10 @@ def _read_excel(raw_bytes: bytes, file_type: str, header_row: int) -> pl.DataFra
     ]
 
     if not data_rows:
-        raise NormalizationError("File contains no data rows")
+        raise NormalizationError(
+            "File contains no data rows",
+            context={"hint": "Excel-Datei enthält keine Datenzeilen nach dem Header"},
+        )
 
     # Filter out empty column names (trailing empty cells in Excel)
     valid_cols = [(i, col) for i, col in enumerate(columns) if col]
@@ -270,7 +285,8 @@ def _build_timestamps(
         )
     else:
         raise NormalizationError(
-            f"Unsupported timestamp column configuration: {timestamp_columns}"
+            f"Unsupported timestamp column configuration: {timestamp_columns}",
+            context={"timestamp_columns": timestamp_columns},
         )
 
     # Convert local time to UTC using Python datetime (handles DST correctly)
