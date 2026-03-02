@@ -6,12 +6,16 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import logging
+
 from load_gear.services.analysis.day_classifier import (
     _get_federal_holidays,
     _is_bridge_day,
     _is_non_workday,
     _SUMMER_MONTHS,
 )
+
+logger = logging.getLogger(__name__)
 
 _BERLIN = ZoneInfo("Europe/Berlin")
 
@@ -77,10 +81,18 @@ def match_days(
         [{ts_utc, y_hat, q10, q50, q90}]
     """
     if not v2_rows:
+        logger.warning("match_days: v2_rows is empty, returning []")
         return []
 
     intervals_per_day = 24 * 60 // interval_minutes
     scale = percentage / 100.0
+
+    logger.info(
+        "match_days: v2_rows=%d, horizon_start=%s (tz=%s), horizon_end=%s (tz=%s), "
+        "interval=%dmin, percentage=%.1f",
+        len(v2_rows), horizon_start, horizon_start.tzinfo,
+        horizon_end, horizon_end.tzinfo, interval_minutes, percentage,
+    )
 
     # Collect years from historical data
     years: set[int] = set()
@@ -142,6 +154,12 @@ def match_days(
         type_interval_values[day_type][interval_idx].append(val)
         global_interval_values[interval_idx].append(val)
 
+    logger.info(
+        "match_days: day_types=%s, stoerung_days=%d, global_intervals=%d",
+        list(type_interval_values.keys()), len(stoerung_dates),
+        len(global_interval_values),
+    )
+
     # Generate forecast timestamps
     predictions: list[dict] = []
     current = horizon_start
@@ -169,6 +187,7 @@ def match_days(
 
         current += delta
 
+    logger.info("match_days: generated %d predictions", len(predictions))
     return predictions
 
 
