@@ -2,6 +2,19 @@
 
 Phases 1–7 complete. Phase 7 archived to docs/status/STATUS_phase7_full.md.
 
+## API-Dokumentation (DONE)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| DOC-01 | Umfassende API-Dokumentation (`docs/API.md`) mit allen 48 Endpoints, Datenmodell, Architektur, Beispielen | done |
+
+### Deliverables
+- **`docs/API.md`** — 1500+ Zeilen Markdown-Dokumentation
+- 11 Endpoint-Gruppen: Admin, Jobs, Files, Ingest, QA, Analysis, Forecasts, HPFC, Financial, Pipeline, Weather
+- Jeder Endpoint: HTTP-Methode, URL, Request/Response-Schema, Fehlercodes, curl-Beispiele
+- Datenmodell: 3 Schemas, 14 Tabellen, Quality-Flags, 9 Tagtypen
+- Architektur-Übersicht: Datenfluss v1→v2→v3→cost, Job-Zustandsmaschine
+
 ## Phase 8 — Multi-Provider HPFC (DONE)
 
 | Task | Description | Status |

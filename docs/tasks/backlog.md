@@ -123,3 +123,7 @@
 83. [x] MP-09 — Pipeline route: `provider_ids` form field
 84. [x] MP-10 — Frontend: provider multiselect dropdown + Anbietervergleich result table
 85. [x] MP-11 — Tests: 6 new multi-provider tests + existing test updates (377 total)
+
+## API-Dokumentation
+
+86. [x] DOC-01 — Umfassende API-Dokumentation (`docs/API.md`): alle 48 Endpoints, Datenmodell (3 Schemas, 14 Tabellen), Architektur, Beispiele, Fehlercodes
